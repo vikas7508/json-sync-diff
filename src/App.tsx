@@ -9,6 +9,7 @@ import Layout from "@/components/Layout";
 import Configuration from "@/pages/Configuration";
 import Compare from "@/pages/Compare";
 import Summary from "@/pages/Summary";
+import ConfigManagement from "@/pages/ConfigManagement";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,6 +25,7 @@ const App = () => (
             <Route path="/" element={<Layout><Configuration /></Layout>} />
             <Route path="/compare" element={<Layout><Compare /></Layout>} />
             <Route path="/summary" element={<Layout><Summary /></Layout>} />
+            <Route path="/config-management" element={<Layout><ConfigManagement /></Layout>} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
