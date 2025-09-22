@@ -1,5 +1,6 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { diff } from 'deep-diff';
+import { demoComparisonSessions } from '@/data/demoData';
 
 export interface ComparisonResult {
   path: string;
@@ -35,9 +36,9 @@ interface ComparisonState {
 }
 
 const initialState: ComparisonState = {
-  sessions: [],
-  activeSessionId: null,
-  selectedInstances: [],
+  sessions: demoComparisonSessions, // Load demo data
+  activeSessionId: demoComparisonSessions[0]?.id || null, // Set first session as active
+  selectedInstances: ['prod-001', 'staging-001'], // Pre-select demo instances
   currentEndpoint: '/api/settings',
   comparisonType: 'settings',
   loading: false,

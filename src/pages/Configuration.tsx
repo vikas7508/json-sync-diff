@@ -9,6 +9,7 @@ import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
 import { addInstance, updateInstance, removeInstance, toggleInstanceActive } from '@/store/slices/instancesSlice';
 import { Plus, Trash2, Server, Link, Key, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import DemoDataBanner from '@/components/DemoDataBanner';
 
 const Configuration: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -77,6 +78,9 @@ const Configuration: React.FC = () => {
 
   return (
     <div className="space-y-8">
+      {/* Demo Data Banner */}
+      <DemoDataBanner />
+
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-foreground">Instance Configuration</h1>

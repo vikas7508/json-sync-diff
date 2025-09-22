@@ -1,4 +1,5 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
+import { demoInstances, demoInstanceData } from '@/data/demoData';
 
 export interface Instance {
   id: string;
@@ -25,8 +26,8 @@ interface InstancesState {
 }
 
 const initialState: InstancesState = {
-  instances: [],
-  instanceData: {},
+  instances: demoInstances, // Load demo data
+  instanceData: demoInstanceData, // Load demo data
   loading: false,
   error: null,
 };
