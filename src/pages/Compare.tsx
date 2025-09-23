@@ -6,15 +6,15 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
 import { fetchInstanceData } from '@/store/slices/instancesSlice';
-import { setSelectedInstances, setComparisonType, createComparisonSession } from '@/store/slices/comparisonSlice';
+import { setSelectedInstances, setBaseInstanceId, setComparisonType, createComparisonSession, ComparisonData } from '@/store/slices/comparisonSlice';
 import { GitCompare, Settings, Database, ToggleLeft, Play, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import ReactJsonView from 'react-json-view';
+import ReactJson from "@microlink/react-json-view";
 
 const Compare: React.FC = () => {
   const dispatch = useAppDispatch();
   const { instances, instanceData, loading } = useAppSelector((state) => state.instances);
-  const { selectedInstances, comparisonType, currentEndpoint } = useAppSelector((state) => state.comparison);
+    const { selectedInstances, baseInstanceId, comparisonType, currentEndpoint } = useAppSelector((state) => state.comparison);
   const { toast } = useToast();
   
   const [sessionName, setSessionName] = useState('');
@@ -40,7 +40,7 @@ const Compare: React.FC = () => {
       value: 'featureToggle', 
       label: 'Feature Toggles', 
       icon: ToggleLeft, 
-      endpoint: '/api/feature-toggles',
+      endpoint: '/GetAllFeatureFlags',
       description: 'Compare feature flags and toggles'
     },
   ];
@@ -54,6 +54,10 @@ const Compare: React.FC = () => {
 
   const handleComparisonTypeChange = (type: 'settings' | 'codeTable' | 'featureToggle') => {
     dispatch(setComparisonType(type));
+  };
+
+  const handleBaseInstanceChange = (instanceId: string) => {
+    dispatch(setBaseInstanceId(instanceId));
   };
 
   const handleFetchData = async () => {
@@ -97,11 +101,11 @@ const Compare: React.FC = () => {
       return;
     }
 
-    const selectedInstanceData: Record<string, any> = {};
+    const selectedInstanceData: Record<string, ComparisonData> = {};
     selectedInstances.forEach(id => {
       const data = instanceData[id];
       if (data) {
-        selectedInstanceData[id] = data.data;
+        selectedInstanceData[id] = data.data as ComparisonData;
       }
     });
 
@@ -150,7 +154,7 @@ const Compare: React.FC = () => {
                   className={`cursor-pointer transition-all hover:shadow-md ${
                     isSelected ? 'border-primary bg-primary/5' : ''
                   }`}
-                  onClick={() => handleComparisonTypeChange(type.value as any)}
+                  onClick={() => handleComparisonTypeChange(type.value as 'settings' | 'codeTable' | 'featureToggle')}
                 >
                   <CardContent className="p-4">
                     <div className="flex items-center space-x-3">
@@ -233,6 +237,48 @@ const Compare: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* Base Instance Selection */}
+      {selectedInstances.length >= 2 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Base Instance</CardTitle>
+            <CardDescription>
+              Choose which instance to use as the reference for comparison. All other instances will be compared against this base.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Select 
+              value={baseInstanceId || ''} 
+              onValueChange={handleBaseInstanceChange}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select base instance (optional)" />
+              </SelectTrigger>
+              <SelectContent>
+                {selectedInstances.map((instanceId) => {
+                  const instance = getInstanceById(instanceId);
+                  return (
+                    <SelectItem key={instanceId} value={instanceId}>
+                      <div className="flex items-center space-x-2">
+                        <span>{instance?.name}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {instance?.url}
+                        </Badge>
+                      </div>
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+            {baseInstanceId && (
+              <div className="mt-2 p-2 bg-muted/50 rounded text-sm text-muted-foreground">
+                <strong>Base:</strong> {getInstanceById(baseInstanceId)?.name} - Other instances will be compared against this one.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Actions */}
       <Card>
         <CardContent className="p-6">
@@ -293,7 +339,7 @@ const Compare: React.FC = () => {
                     <h4 className="font-medium text-sm">{instance?.name}</h4>
                     <div className="max-h-64 overflow-auto rounded border bg-muted/30 p-2">
                       {data?.data ? (
-                        <ReactJsonView
+                        <ReactJson
                           src={data.data}
                           theme="bright"
                           collapsed={2}

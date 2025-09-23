@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -7,25 +7,71 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAppSelector, useAppDispatch } from '@/hooks/useRedux';
 import { setActiveSession, deleteSession } from '@/store/slices/comparisonSlice';
 import { postInstanceData } from '@/store/slices/instancesSlice';
-import { BarChart3, TrendingUp, TrendingDown, Minus, Trash2, Eye, Calendar, Save, ArrowRight } from 'lucide-react';
+import { BarChart3, TrendingUp, TrendingDown, Pencil, Trash2, Eye, Calendar, Save, ArrowRight, ChevronDown, ChevronRight } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+
+// Legacy comparison result type for backward compatibility
+type LegacyComparisonResult = {
+  path: string;
+  type: 'added' | 'deleted' | 'edited' | 'unchanged';
+  leftValue?: unknown;
+  rightValue?: unknown;
+  description: string;
+};
 
 const Summary: React.FC = () => {
   const dispatch = useAppDispatch();
-  const { sessions, activeSessionId } = useAppSelector((state) => state.comparison);
+  const { sessions, activeSessionId, baseInstanceId } = useAppSelector((state) => state.comparison);
   const { instances, loading } = useAppSelector((state) => state.instances);
   const { toast } = useToast();
   
   const [selectedForMigration, setSelectedForMigration] = useState<string[]>([]);
   const [migrationTarget, setMigrationTarget] = useState<string>('');
   const [migrationSource, setMigrationSource] = useState<string>('');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'added' | 'deleted' | 'edited'>('all');
+  const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
   
   const activeSession = sessions.find(s => s.id === activeSessionId);
+
+  // Helper to check if result has the new values format
+  const hasResultValues = (result: unknown): result is { values: Record<string, unknown>; affectedInstances: string[] } => {
+    return typeof result === 'object' && result !== null && 'values' in result && 'affectedInstances' in result;
+  };
 
   const getInstanceName = (id: string) => {
     const instance = instances.find(i => i.id === id);
     return instance?.name || 'Unknown Instance';
   };
+
+  const getFilteredResults = () => {
+    if (!activeSession) return [];
+    
+    if (activeFilter === 'all') {
+      return activeSession.results;
+    }
+    
+    return activeSession.results.filter(result => result.type === activeFilter);
+  };
+
+  const handleFilterClick = (filterType: 'all' | 'added' | 'deleted' | 'edited') => {
+    setActiveFilter(filterType);
+  };
+
+  const toggleExpansion = (index: number) => {
+    const newExpanded = new Set(expandedItems);
+    if (newExpanded.has(index)) {
+      newExpanded.delete(index);
+    } else {
+      newExpanded.add(index);
+    }
+    setExpandedItems(newExpanded);
+  };
+
+  // Clear migration selections and expanded items when filter changes
+  useEffect(() => {
+    setSelectedForMigration([]);
+    setExpandedItems(new Set());
+  }, [activeFilter]);
 
   const getDifferenceTypeIcon = (type: string) => {
     switch (type) {
@@ -34,7 +80,7 @@ const Summary: React.FC = () => {
       case 'deleted':
         return <TrendingDown className="h-4 w-4 text-destructive" />;
       case 'edited':
-        return <Minus className="h-4 w-4 text-warning" />;
+        return <Pencil className="h-4 w-4 text-warning" />;
       default:
         return null;
     }
@@ -43,11 +89,11 @@ const Summary: React.FC = () => {
   const getDifferenceTypeColor = (type: string) => {
     switch (type) {
       case 'added':
-        return 'success';
+        return 'default';
       case 'deleted':
         return 'destructive';
       case 'edited':
-        return 'warning';
+        return 'outline';
       default:
         return 'secondary';
     }
@@ -76,7 +122,7 @@ const Summary: React.FC = () => {
     }
 
     // Build migration data from selected paths
-    const migrationData: any = {};
+    const migrationData: Record<string, unknown> = {};
     // This is a simplified version - you'd need to properly extract the values
     // from the source instance data based on the selected paths
     
@@ -165,8 +211,12 @@ const Summary: React.FC = () => {
                         <div className="flex items-center space-x-1 text-xs">
                           {session.instanceIds.map((id, index) => (
                             <React.Fragment key={id}>
-                              <Badge variant="outline" className="text-xs">
+                              <Badge 
+                                variant={baseInstanceId === id ? "default" : "outline"} 
+                                className={`text-xs ${baseInstanceId === id ? 'bg-primary' : ''}`}
+                              >
                                 {getInstanceName(id)}
+                                {baseInstanceId === id && ' (Base)'}
                               </Badge>
                               {index < session.instanceIds.length - 1 && (
                                 <span className="text-muted-foreground">vs</span>
@@ -216,7 +266,10 @@ const Summary: React.FC = () => {
         <>
           {/* Summary Statistics */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <Card>
+            <Card 
+              className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'all' ? 'border-primary bg-primary/5' : ''}`}
+              onClick={() => handleFilterClick('all')}
+            >
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
@@ -230,7 +283,10 @@ const Summary: React.FC = () => {
               </CardContent>
             </Card>
             
-            <Card>
+            <Card 
+              className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'added' ? 'border-primary bg-primary/5' : ''}`}
+              onClick={() => handleFilterClick('added')}
+            >
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
@@ -244,7 +300,10 @@ const Summary: React.FC = () => {
               </CardContent>
             </Card>
             
-            <Card>
+            <Card 
+              className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'deleted' ? 'border-primary bg-primary/5' : ''}`}
+              onClick={() => handleFilterClick('deleted')}
+            >
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
@@ -258,7 +317,10 @@ const Summary: React.FC = () => {
               </CardContent>
             </Card>
             
-            <Card>
+            <Card 
+              className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'edited' ? 'border-primary bg-primary/5' : ''}`}
+              onClick={() => handleFilterClick('edited')}
+            >
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
@@ -267,7 +329,7 @@ const Summary: React.FC = () => {
                       {activeSession.summary.edited}
                     </p>
                   </div>
-                  <Minus className="h-8 w-8 text-warning" />
+                  <Pencil className="h-8 w-8 text-warning" />
                 </div>
               </CardContent>
             </Card>
@@ -353,42 +415,58 @@ const Summary: React.FC = () => {
         {/* Detailed Differences */}
           <Card>
             <CardHeader>
-              <CardTitle>Detailed Differences</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle>
+                  Detailed Differences
+                  <span className="ml-2 text-sm font-normal text-muted-foreground">
+                    ({getFilteredResults().length} {activeFilter === 'all' ? 'total' : activeFilter})
+                  </span>
+                </CardTitle>
+                {activeFilter !== 'all' && (
+                  <Badge variant="outline" className="text-xs">
+                    Filter: {activeFilter.charAt(0).toUpperCase() + activeFilter.slice(1)}
+                  </Badge>
+                )}
+              </div>
           <CardDescription>
-            Complete breakdown of all differences found in the comparison. Select items to migrate.
+            {activeFilter === 'all' 
+              ? 'Complete breakdown of all differences found in the comparison. Select items to migrate.'
+              : `Showing ${activeFilter} differences only. Click on any statistics card above to change the filter.`
+            }
           </CardDescription>
             </CardHeader>
             <CardContent>
-              {activeSession.results.length === 0 ? (
+              {getFilteredResults().length === 0 ? (
                 <div className="text-center py-8">
-                  <p className="text-muted-foreground">No differences found</p>
+                  <p className="text-muted-foreground">
+                    {activeFilter === 'all' ? 'No differences found' : `No ${activeFilter} differences found`}
+                  </p>
                   <p className="text-sm text-muted-foreground/75 mt-1">
-                    The compared instances have identical JSON structures and values
+                    {activeFilter === 'all' 
+                      ? 'The compared instances have identical JSON structures and values'
+                      : `There are no ${activeFilter} differences in this comparison. Try selecting a different filter.`
+                    }
                   </p>
                 </div>
               ) : (
         <div className="grid grid-cols-1 gap-4">
-          {activeSession.results.map((result, index) => (
-            <div
-              key={index}
-              className="flex items-start space-x-3 rounded-lg border bg-card p-4"
-            >
-              <div className="flex-shrink-0 mt-1">
-                {getDifferenceTypeIcon(result.type)}
-              </div>
-              
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center space-x-2 mb-1">
-                  <Badge 
-                    variant={getDifferenceTypeColor(result.type) as any}
-                    className="text-xs capitalize"
+          {getFilteredResults().map((result, index) => {
+            const isExpanded = expandedItems.has(index);
+            return (
+              <div
+                key={index}
+                className="rounded-lg border bg-card hover:bg-muted/20 transition-colors"
+              >
+                {/* Card Header - Always Visible - Single Line Layout */}
+                <div 
+                  className="flex items-center space-x-3 p-3 cursor-pointer"
+                  onClick={() => toggleExpansion(index)}
+                >
+                  {/* Migrate Checkbox */}
+                  <div 
+                    className="flex-shrink-0"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    {result.type}
-                  </Badge>
-                  <code className="text-sm font-mono bg-muted px-2 py-1 rounded">
-                    {result.path}
-                  </code>
-                  <div className="ml-auto">
                     <Checkbox
                       id={`migrate-${index}`}
                       checked={selectedForMigration.includes(result.path)}
@@ -396,46 +474,103 @@ const Summary: React.FC = () => {
                         handleMigrationSelection(result.path, checked as boolean)
                       }
                     />
-                    <label 
-                      htmlFor={`migrate-${index}`}
-                      className="ml-2 text-xs text-muted-foreground cursor-pointer"
-                    >
-                      Migrate
-                    </label>
+                  </div>
+                  
+                  {/* Type Icon */}
+                  <div className="flex-shrink-0">
+                    {getDifferenceTypeIcon(result.type)}
+                  </div>
+                  
+                  {/* Type Badge */}
+                  <Badge 
+                    variant={getDifferenceTypeColor(result.type)}
+                    className="text-xs capitalize flex-shrink-0"
+                  >
+                    {result.type}
+                  </Badge>
+                  
+                  {/* Path */}
+                  <code className="text-sm font-mono bg-muted px-2 py-1 rounded flex-1 min-w-0 truncate">
+                    {result.path}
+                  </code>
+                  
+                  {/* Migrate Label */}
+                  <span className="text-xs text-muted-foreground flex-shrink-0">
+                    Migrate
+                  </span>
+
+                  {/* Expand/Collapse Button */}
+                  <div className="flex-shrink-0 p-1">
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    )}
                   </div>
                 </div>
-                
-                <p className="text-sm text-muted-foreground mb-2">
-                  {result.description}
-                </p>
-                
-                {(result.leftValue !== undefined || result.rightValue !== undefined) && (
-                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                    {result.leftValue !== undefined && (
-                      <div className="text-xs">
-                        <span className="font-medium text-destructive">
-                          {getInstanceName(activeSession.instanceIds[0])}:
-                        </span>
-                        <code className="ml-2 bg-destructive/10 px-2 py-1 rounded">
-                          {JSON.stringify(result.leftValue)}
-                        </code>
-                      </div>
-                    )}
-                    {result.rightValue !== undefined && (
-                      <div className="text-xs">
-                        <span className="font-medium text-success">
-                          {getInstanceName(activeSession.instanceIds[1])}:
-                        </span>
-                        <code className="ml-2 bg-success/10 px-2 py-1 rounded">
-                          {JSON.stringify(result.rightValue)}
-                        </code>
-                      </div>
-                    )}
+
+                {/* Card Content - Collapsible */}
+                {isExpanded && (
+                  <div className="px-3 pb-3 border-t bg-muted/10">
+                    <div className="pt-3 space-y-3">
+                      {/* Description */}
+                      <p className="text-sm text-muted-foreground italic">
+                        {result.description}
+                      </p>
+                      
+                      {/* Display values - support both old and new formats */}
+                      {hasResultValues(result) ? (
+                        // New format: multiple instances with values object
+                        <div className="space-y-2">
+                          {Object.entries(result.values).map(([instanceId, value]) => {
+                            const isBaseInstance = baseInstanceId === instanceId;
+                            const isMissing = value === 'MISSING';
+                            return (
+                              <div key={instanceId} className="text-xs">
+                                <span className={`font-medium ${isBaseInstance ? 'text-primary' : isMissing ? 'text-destructive' : 'text-muted-foreground'}`}>
+                                  {getInstanceName(instanceId)}
+                                  {isBaseInstance && ' (Base)'}:
+                                </span>
+                                <code className={`ml-2 px-2 py-1 rounded ${isMissing ? 'bg-destructive/10 text-destructive' : isBaseInstance ? 'bg-primary/10' : 'bg-muted'}`}>
+                                  {isMissing ? 'MISSING' : JSON.stringify(value)}
+                                </code>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        // Legacy format: leftValue/rightValue
+                        ((result as LegacyComparisonResult).leftValue !== undefined || (result as LegacyComparisonResult).rightValue !== undefined) && (
+                          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                            {(result as LegacyComparisonResult).leftValue !== undefined && (
+                              <div className="text-xs">
+                                <span className="font-medium text-destructive">
+                                  {getInstanceName(activeSession.instanceIds[0])}:
+                                </span>
+                                <code className="ml-2 bg-destructive/10 px-2 py-1 rounded">
+                                  {JSON.stringify((result as LegacyComparisonResult).leftValue)}
+                                </code>
+                              </div>
+                            )}
+                            {(result as LegacyComparisonResult).rightValue !== undefined && (
+                              <div className="text-xs">
+                                <span className="font-medium text-success">
+                                  {getInstanceName(activeSession.instanceIds[1])}:
+                                </span>
+                                <code className="ml-2 bg-success/10 px-2 py-1 rounded">
+                                  {JSON.stringify((result as LegacyComparisonResult).rightValue)}
+                                </code>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
               )}
             </CardContent>

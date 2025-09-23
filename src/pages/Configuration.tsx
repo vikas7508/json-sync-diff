@@ -9,7 +9,6 @@ import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
 import { addInstance, updateInstance, removeInstance, toggleInstanceActive } from '@/store/slices/instancesSlice';
 import { Plus, Trash2, Server, Link, Key, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import DemoDataBanner from '@/components/DemoDataBanner';
 
 const Configuration: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -66,9 +65,9 @@ const Configuration: React.FC = () => {
   const getStatusColor = (status?: string) => {
     switch (status) {
       case 'connected':
-        return 'success';
+        return 'default';
       case 'loading':
-        return 'warning';
+        return 'outline';
       case 'error':
         return 'destructive';
       default:
@@ -78,9 +77,6 @@ const Configuration: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      {/* Demo Data Banner */}
-      <DemoDataBanner />
-
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-foreground">Instance Configuration</h1>
@@ -185,7 +181,7 @@ const Configuration: React.FC = () => {
                         <div className="flex items-center space-x-2">
                           <h3 className="font-semibold text-foreground">{instance.name}</h3>
                           <Badge 
-                            variant={getStatusColor(instance.status) as any}
+                            variant={getStatusColor(instance.status)}
                             className="text-xs"
                           >
                             <div className="flex items-center space-x-1">

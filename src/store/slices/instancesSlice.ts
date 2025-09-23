@@ -1,5 +1,4 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { demoInstances, demoInstanceData } from '@/data/demoData';
 
 export interface Instance {
   id: string;
@@ -13,10 +12,50 @@ export interface Instance {
 
 export interface InstanceData {
   instanceId: string;
-  data: any;
+  data: unknown;
   timestamp: string;
   error?: string;
 }
+
+// Local storage utilities
+const INSTANCES_STORAGE_KEY = 'json-sync-diff-instances';
+const INSTANCE_DATA_STORAGE_KEY = 'json-sync-diff-instance-data';
+
+const saveInstancesToLocalStorage = (instances: Instance[]) => {
+  try {
+    localStorage.setItem(INSTANCES_STORAGE_KEY, JSON.stringify(instances));
+  } catch (error) {
+    console.error('Failed to save instances to localStorage:', error);
+  }
+};
+
+const loadInstancesFromLocalStorage = (): Instance[] => {
+  try {
+    const stored = localStorage.getItem(INSTANCES_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch (error) {
+    console.error('Failed to load instances from localStorage:', error);
+    return [];
+  }
+};
+
+const saveInstanceDataToLocalStorage = (instanceData: Record<string, InstanceData>) => {
+  try {
+    localStorage.setItem(INSTANCE_DATA_STORAGE_KEY, JSON.stringify(instanceData));
+  } catch (error) {
+    console.error('Failed to save instance data to localStorage:', error);
+  }
+};
+
+const loadInstanceDataFromLocalStorage = (): Record<string, InstanceData> => {
+  try {
+    const stored = localStorage.getItem(INSTANCE_DATA_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch (error) {
+    console.error('Failed to load instance data from localStorage:', error);
+    return {};
+  }
+};
 
 interface InstancesState {
   instances: Instance[];
@@ -25,9 +64,12 @@ interface InstancesState {
   error: string | null;
 }
 
+const loadedInstances = loadInstancesFromLocalStorage();
+const loadedInstanceData = loadInstanceDataFromLocalStorage();
+
 const initialState: InstancesState = {
-  instances: demoInstances, // Load demo data
-  instanceData: demoInstanceData, // Load demo data
+  instances: loadedInstances,
+  instanceData: loadedInstanceData,
   loading: false,
   error: null,
 };
@@ -43,9 +85,9 @@ export const fetchInstanceData = createAsyncThunk(
       throw new Error('Instance not found');
     }
 
-    const response = await fetch(`${instance.url}${endpoint}`, {
+    const response = await fetch(`${instance.url}${endpoint}?authkey=${instance.authKey}`, {
+      method: 'POST',
       headers: {
-        'Authorization': `Bearer ${instance.authKey}`,
         'Content-Type': 'application/json',
       },
     });
@@ -67,7 +109,7 @@ export const fetchInstanceData = createAsyncThunk(
 // Async thunk for posting data to an instance
 export const postInstanceData = createAsyncThunk(
   'instances/postData',
-  async ({ instanceId, endpoint, data }: { instanceId: string; endpoint: string; data: any }, { getState }) => {
+  async ({ instanceId, endpoint, data }: { instanceId: string; endpoint: string; data: unknown }, { getState }) => {
     const state = getState() as { instances: InstancesState };
     const instance = state.instances.instances.find(i => i.id === instanceId);
     
@@ -103,27 +145,33 @@ const instancesSlice = createSlice({
         status: 'disconnected',
       };
       state.instances.push(newInstance);
+      saveInstancesToLocalStorage(state.instances);
     },
     updateInstance: (state, action: PayloadAction<Instance>) => {
       const index = state.instances.findIndex(i => i.id === action.payload.id);
       if (index !== -1) {
         state.instances[index] = action.payload;
+        saveInstancesToLocalStorage(state.instances);
       }
     },
     removeInstance: (state, action: PayloadAction<string>) => {
       state.instances = state.instances.filter(i => i.id !== action.payload);
       delete state.instanceData[action.payload];
+      saveInstancesToLocalStorage(state.instances);
+      saveInstanceDataToLocalStorage(state.instanceData);
     },
     toggleInstanceActive: (state, action: PayloadAction<string>) => {
       const instance = state.instances.find(i => i.id === action.payload);
       if (instance) {
         instance.isActive = !instance.isActive;
+        saveInstancesToLocalStorage(state.instances);
       }
     },
     setInstanceStatus: (state, action: PayloadAction<{ id: string; status: Instance['status'] }>) => {
       const instance = state.instances.find(i => i.id === action.payload.id);
       if (instance) {
         instance.status = action.payload.status;
+        saveInstancesToLocalStorage(state.instances);
       }
     },
     clearError: (state) => {
@@ -139,10 +187,12 @@ const instancesSlice = createSlice({
       .addCase(fetchInstanceData.fulfilled, (state, action) => {
         state.loading = false;
         state.instanceData[action.payload.instanceId] = action.payload;
+        saveInstanceDataToLocalStorage(state.instanceData);
         const instance = state.instances.find(i => i.id === action.payload.instanceId);
         if (instance) {
           instance.status = 'connected';
           instance.lastSync = action.payload.timestamp;
+          saveInstancesToLocalStorage(state.instances);
         }
       })
       .addCase(fetchInstanceData.rejected, (state, action) => {
