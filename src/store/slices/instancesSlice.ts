@@ -77,7 +77,15 @@ const initialState: InstancesState = {
 // Async thunk for fetching data from an instance
 export const fetchInstanceData = createAsyncThunk(
   'instances/fetchData',
-  async ({ instanceId, endpoint }: { instanceId: string; endpoint: string }, { getState }) => {
+  async ({ 
+    instanceId, 
+    endpoint, 
+    requestBody 
+  }: { 
+    instanceId: string; 
+    endpoint: string; 
+    requestBody?: Record<string, unknown> 
+  }, { getState }) => {
     const state = getState() as { instances: InstancesState };
     const instance = state.instances.instances.find(i => i.id === instanceId);
     
@@ -90,7 +98,7 @@ export const fetchInstanceData = createAsyncThunk(
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ action: 'fetch' }),
+      body: JSON.stringify(requestBody || { action: 'fetch' }),
     });
 
     if (!response.ok) {

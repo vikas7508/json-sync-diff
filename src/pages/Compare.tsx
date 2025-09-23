@@ -28,7 +28,11 @@ const Compare: React.FC = () => {
   const [showCustomTypeDialog, setShowCustomTypeDialog] = useState(false);
   const [showEditEndpointsDialog, setShowEditEndpointsDialog] = useState(false);
   const [editingType, setEditingType] = useState<string>('');
-  const [editingEndpoints, setEditingEndpoints] = useState({ fetchEndpoint: '', saveEndpoint: '' });
+  const [editingEndpoints, setEditingEndpoints] = useState({ 
+    fetchEndpoint: '', 
+    saveEndpoint: '', 
+    requestBody: '' 
+  });
   const [newCustomType, setNewCustomType] = useState({
     name: '',
     label: '',
@@ -37,7 +41,9 @@ const Compare: React.FC = () => {
     description: '',
     sampleData: '',
     comparisonFields: [] as string[],
+    responseFields: [] as string[],
     identifierField: '',
+    requestBody: '',
   });
 
   const activeInstances = instances.filter(i => i.isActive);
@@ -122,6 +128,21 @@ const Compare: React.FC = () => {
       return;
     }
 
+    // Parse request body if provided
+    let parsedRequestBody: Record<string, unknown> | undefined;
+    if (newCustomType.requestBody.trim()) {
+      try {
+        parsedRequestBody = JSON.parse(newCustomType.requestBody);
+      } catch (error) {
+        toast({
+          title: "Invalid JSON",
+          description: "Request body must be valid JSON format",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     dispatch(addCustomComparisonType({
       name: newCustomType.name,
       label: newCustomType.label,
@@ -130,7 +151,9 @@ const Compare: React.FC = () => {
       description: newCustomType.description,
       sampleData: parsedSampleData,
       comparisonFields: fields,
+      responseFields: newCustomType.responseFields,
       identifierField: newCustomType.identifierField || undefined,
+      requestBody: parsedRequestBody,
     }));
 
     // Reset form and close dialog
@@ -142,7 +165,9 @@ const Compare: React.FC = () => {
       description: '',
       sampleData: '',
       comparisonFields: [],
+      responseFields: [],
       identifierField: '',
+      requestBody: '',
     });
     setShowCustomTypeDialog(false);
 
@@ -168,7 +193,8 @@ const Compare: React.FC = () => {
       setEditingType(typeName);
       setEditingEndpoints({
         fetchEndpoint: config.fetchEndpoint,
-        saveEndpoint: config.saveEndpoint
+        saveEndpoint: config.saveEndpoint,
+        requestBody: config.requestBody ? JSON.stringify(config.requestBody, null, 2) : ''
       });
       setShowEditEndpointsDialog(true);
     }
@@ -186,6 +212,8 @@ const Compare: React.FC = () => {
         sampleData: JSON.stringify(customType.sampleData, null, 2),
         comparisonFields: customType.comparisonFields,
         identifierField: customType.identifierField || '',
+        responseFields: customType.responseFields || [],
+        requestBody: customType.requestBody ? JSON.stringify(customType.requestBody, null, 2) : '',
       });
       setEditingType(customTypeId);
       setShowCustomTypeDialog(true);
@@ -194,10 +222,26 @@ const Compare: React.FC = () => {
 
   const handleUpdateBuiltInEndpoints = () => {
     if (editingType && editingEndpoints.fetchEndpoint && editingEndpoints.saveEndpoint) {
+      // Parse request body if provided
+      let requestBody: Record<string, unknown> | undefined;
+      if (editingEndpoints.requestBody.trim()) {
+        try {
+          requestBody = JSON.parse(editingEndpoints.requestBody);
+        } catch (error) {
+          toast({
+            title: "Invalid JSON",
+            description: "Request body must be valid JSON format",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
       dispatch(updateBuiltInEndpoints({
         type: editingType,
         fetchEndpoint: editingEndpoints.fetchEndpoint,
-        saveEndpoint: editingEndpoints.saveEndpoint
+        saveEndpoint: editingEndpoints.saveEndpoint,
+        requestBody
       }));
       
       toast({
@@ -207,7 +251,7 @@ const Compare: React.FC = () => {
       
       setShowEditEndpointsDialog(false);
       setEditingType('');
-      setEditingEndpoints({ fetchEndpoint: '', saveEndpoint: '' });
+      setEditingEndpoints({ fetchEndpoint: '', saveEndpoint: '', requestBody: '' });
     }
   };
 
@@ -215,6 +259,21 @@ const Compare: React.FC = () => {
     if (editingType) {
       const customType = customTypes?.find(t => t.id === editingType);
       if (customType) {
+        // Parse request body if provided
+        let parsedRequestBody: Record<string, unknown> | undefined;
+        if (newCustomType.requestBody.trim()) {
+          try {
+            parsedRequestBody = JSON.parse(newCustomType.requestBody);
+          } catch (error) {
+            toast({
+              title: "Invalid JSON",
+              description: "Request body must be valid JSON format",
+              variant: "destructive",
+            });
+            return;
+          }
+        }
+
         dispatch(updateCustomComparisonType({
           ...customType,
           name: newCustomType.name,
@@ -224,7 +283,9 @@ const Compare: React.FC = () => {
           description: newCustomType.description,
           sampleData: JSON.parse(newCustomType.sampleData),
           comparisonFields: newCustomType.comparisonFields,
+          responseFields: newCustomType.responseFields,
           identifierField: newCustomType.identifierField || undefined,
+          requestBody: parsedRequestBody,
         }));
         
         toast({
@@ -243,6 +304,8 @@ const Compare: React.FC = () => {
           sampleData: '',
           comparisonFields: [],
           identifierField: '',
+          responseFields: [],
+          requestBody: '',
         });
       }
     }
@@ -293,9 +356,28 @@ const Compare: React.FC = () => {
     }
 
     try {
+      // Get request body configuration for the current comparison type
+      let requestBody: Record<string, unknown> | undefined;
+      
+      // Check if it's a built-in type
+      const endpointConfig = builtInEndpoints[comparisonType as keyof typeof builtInEndpoints];
+      if (endpointConfig) {
+        requestBody = endpointConfig.requestBody;
+      } else {
+        // Check if it's a custom type
+        const customType = customTypes?.find(t => t.id === comparisonType);
+        if (customType) {
+          requestBody = customType.requestBody;
+        }
+      }
+
       // Fetch data from all selected instances
       const fetchPromises = selectedInstances.map(instanceId => 
-        dispatch(fetchInstanceData({ instanceId, endpoint: currentFetchEndpoint }))
+        dispatch(fetchInstanceData({ 
+          instanceId, 
+          endpoint: currentFetchEndpoint,
+          requestBody 
+        }))
       );
       
       await Promise.all(fetchPromises);
@@ -403,7 +485,25 @@ const Compare: React.FC = () => {
             </div>
             <Dialog open={showCustomTypeDialog} onOpenChange={setShowCustomTypeDialog}>
               <DialogTrigger asChild>
-                <Button variant="outline" size="sm">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => {
+                    setEditingType(''); // Reset editing state for create mode
+                    setNewCustomType({
+                      name: '',
+                      label: '',
+                      fetchEndpoint: '',
+                      saveEndpoint: '',
+                      description: '',
+                      sampleData: '',
+                      comparisonFields: [],
+                      identifierField: '',
+                      responseFields: [],
+                      requestBody: '',
+                    });
+                  }}
+                >
                   <Plus className="h-4 w-4 mr-2" />
                   Create Custom Type
                 </Button>
@@ -549,6 +649,67 @@ const Compare: React.FC = () => {
                       Specify which fields to compare. Use dot notation for nested fields (e.g., "user.preferences.theme")
                     </p>
                   </div>
+                  
+                  <div>
+                    <Label>Response Fields (Optional)</Label>
+                    <div className="space-y-2 mt-2">
+                      {newCustomType.responseFields.map((field, index) => (
+                        <div key={index} className="flex items-center space-x-2">
+                          <Input
+                            value={field}
+                            onChange={(e) => {
+                              const newFields = [...newCustomType.responseFields];
+                              newFields[index] = e.target.value;
+                              setNewCustomType({ ...newCustomType, responseFields: newFields });
+                            }}
+                            placeholder="Field path (e.g., user.id, settings.lastModified)"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const newFields = newCustomType.responseFields.filter((_, i) => i !== index);
+                              setNewCustomType({ ...newCustomType, responseFields: newFields });
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setNewCustomType({ 
+                            ...newCustomType, 
+                            responseFields: [...newCustomType.responseFields, ''] 
+                          });
+                        }}
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Response Field
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Specify which additional fields to include in the response object. Leave empty to include all fields from the source data.
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="custom-request-body">Request Body (Optional)</Label>
+                    <Textarea
+                      id="custom-request-body"
+                      placeholder='Optional JSON body to send with requests, e.g., {"settingContextRecno": 1}'
+                      value={newCustomType.requestBody}
+                      onChange={(e) => setNewCustomType({ ...newCustomType, requestBody: e.target.value })}
+                      className="min-h-[100px] font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      JSON object to include in the request body when fetching data. Leave empty for default behavior.
+                    </p>
+                  </div>
                 </div>
                 <DialogFooter>
                   <Button variant="outline" onClick={() => {
@@ -563,6 +724,8 @@ const Compare: React.FC = () => {
                       sampleData: '',
                       comparisonFields: [],
                       identifierField: '',
+                      responseFields: [],
+                      requestBody: '',
                     });
                   }}>
                     Cancel
@@ -610,6 +773,23 @@ const Compare: React.FC = () => {
                       })}
                     />
                   </div>
+                  
+                  <div>
+                    <Label htmlFor="edit-request-body">Request Body (Optional)</Label>
+                    <Textarea
+                      id="edit-request-body"
+                      placeholder='Optional JSON body to send with requests, e.g., {"settingContextRecno": 1}'
+                      value={editingEndpoints.requestBody}
+                      onChange={(e) => setEditingEndpoints({ 
+                        ...editingEndpoints, 
+                        requestBody: e.target.value 
+                      })}
+                      className="min-h-[100px] font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      JSON object to include in the request body when fetching data. Leave empty for default behavior.
+                    </p>
+                  </div>
                 </div>
 
                 <DialogFooter>
@@ -618,7 +798,7 @@ const Compare: React.FC = () => {
                     onClick={() => {
                       setShowEditEndpointsDialog(false);
                       setEditingType('');
-                      setEditingEndpoints({ fetchEndpoint: '', saveEndpoint: '' });
+                      setEditingEndpoints({ fetchEndpoint: '', saveEndpoint: '', requestBody: '' });
                     }}
                   >
                     Cancel

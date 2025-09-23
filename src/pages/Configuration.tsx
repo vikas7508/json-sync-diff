@@ -5,9 +5,10 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
-import { addInstance, updateInstance, removeInstance, toggleInstanceActive } from '@/store/slices/instancesSlice';
-import { Plus, Trash2, Server, Link, Key, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
+import { addInstance, updateInstance, removeInstance, toggleInstanceActive, Instance } from '@/store/slices/instancesSlice';
+import { Plus, Trash2, Server, Link, Key, CheckCircle, XCircle, Clock, AlertCircle, Edit } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 const Configuration: React.FC = () => {
@@ -21,6 +22,16 @@ const Configuration: React.FC = () => {
     authKey: '',
     isActive: true,
   });
+
+  const [editingInstance, setEditingInstance] = useState<{
+    id: string;
+    name: string;
+    url: string;
+    authKey: string;
+    isActive: boolean;
+  } | null>(null);
+
+  const [showEditDialog, setShowEditDialog] = useState(false);
 
   const handleAddInstance = () => {
     if (!newInstance.name || !newInstance.url) {
@@ -47,6 +58,49 @@ const Configuration: React.FC = () => {
       title: "Instance Removed",
       description: "Instance configuration has been deleted",
     });
+  };
+
+  const handleEditInstance = (instance: Instance) => {
+    setEditingInstance({
+      id: instance.id,
+      name: instance.name,
+      url: instance.url,
+      authKey: instance.authKey,
+      isActive: instance.isActive,
+    });
+    setShowEditDialog(true);
+  };
+
+  const handleUpdateInstance = () => {
+    if (!editingInstance?.name || !editingInstance?.url) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill in all required fields",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    dispatch(updateInstance({
+      id: editingInstance.id,
+      name: editingInstance.name,
+      url: editingInstance.url,
+      authKey: editingInstance.authKey,
+      isActive: editingInstance.isActive,
+    }));
+
+    setShowEditDialog(false);
+    setEditingInstance(null);
+    
+    toast({
+      title: "Instance Updated",
+      description: `${editingInstance.name} has been successfully updated`,
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setShowEditDialog(false);
+    setEditingInstance(null);
   };
 
   const getStatusIcon = (status?: string) => {
@@ -220,6 +274,14 @@ const Configuration: React.FC = () => {
                       <Button
                         variant="outline"
                         size="sm"
+                        onClick={() => handleEditInstance(instance)}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => handleRemoveInstance(instance.id)}
                         className="text-destructive hover:text-destructive"
                       >
@@ -233,6 +295,82 @@ const Configuration: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Edit Instance Dialog */}
+      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Instance</DialogTitle>
+            <DialogDescription>
+              Update the configuration for this API endpoint
+            </DialogDescription>
+          </DialogHeader>
+          
+          {editingInstance && (
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="edit-name">Instance Name *</Label>
+                <Input
+                  id="edit-name"
+                  placeholder="e.g., Production, Staging, Development"
+                  value={editingInstance.name}
+                  onChange={(e) => setEditingInstance({ 
+                    ...editingInstance, 
+                    name: e.target.value 
+                  })}
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="edit-url">API URL *</Label>
+                <Input
+                  id="edit-url"
+                  placeholder="https://api.example.com"
+                  value={editingInstance.url}
+                  onChange={(e) => setEditingInstance({ 
+                    ...editingInstance, 
+                    url: e.target.value 
+                  })}
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="edit-authKey">Authentication Key</Label>
+                <Input
+                  id="edit-authKey"
+                  placeholder="Optional API key or token"
+                  value={editingInstance.authKey}
+                  onChange={(e) => setEditingInstance({ 
+                    ...editingInstance, 
+                    authKey: e.target.value 
+                  })}
+                />
+              </div>
+              
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="edit-active"
+                  checked={editingInstance.isActive}
+                  onCheckedChange={(checked) => setEditingInstance({ 
+                    ...editingInstance, 
+                    isActive: checked 
+                  })}
+                />
+                <Label htmlFor="edit-active">Active Instance</Label>
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCancelEdit}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateInstance}>
+              Update Instance
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -36,7 +36,9 @@ export interface CustomComparisonType {
   description: string;
   sampleData: object;
   comparisonFields: string[];
+  responseFields: string[]; // Fields to include in response object
   identifierField?: string; // For array-based data like feature toggles
+  requestBody?: Record<string, unknown>; // Optional request body for API calls
   createdAt: string;
 }
 
@@ -66,6 +68,7 @@ export interface ComparisonSession {
 // Local storage utilities
 const COMPARISON_STORAGE_KEY = 'json-sync-diff-comparison-sessions';
 const CUSTOM_TYPES_STORAGE_KEY = 'json-sync-diff-custom-types';
+const BUILTIN_ENDPOINTS_STORAGE_KEY = 'json-sync-diff-builtin-endpoints';
 
 const saveComparisonSessionsToLocalStorage = (sessions: ComparisonSession[]) => {
   try {
@@ -103,6 +106,50 @@ const loadCustomTypesFromLocalStorage = (): CustomComparisonType[] => {
   }
 };
 
+const saveBuiltInEndpointsToLocalStorage = (builtInEndpoints: Record<string, { 
+  fetchEndpoint: string; 
+  saveEndpoint: string;
+  requestBody?: Record<string, unknown>; 
+}>) => {
+  try {
+    localStorage.setItem(BUILTIN_ENDPOINTS_STORAGE_KEY, JSON.stringify(builtInEndpoints));
+  } catch (error) {
+    console.error('Failed to save built-in endpoints to localStorage:', error);
+  }
+};
+
+const loadBuiltInEndpointsFromLocalStorage = (): Record<string, { 
+  fetchEndpoint: string; 
+  saveEndpoint: string;
+  requestBody?: Record<string, unknown>; 
+}> => {
+  try {
+    const stored = localStorage.getItem(BUILTIN_ENDPOINTS_STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (error) {
+    console.error('Failed to load built-in endpoints from localStorage:', error);
+  }
+  
+  // Return default values if not found in localStorage
+  return {
+    settings: {
+      fetchEndpoint: '/api/settings',
+      saveEndpoint: '/TurnOn',
+      requestBody: { settingContextRecno: 1 }
+    },
+    codeTable: {
+      fetchEndpoint: '/api/code-table',
+      saveEndpoint: '/TurnOn'
+    },
+    featureToggle: {
+      fetchEndpoint: '/GetAllFeatureFlags',
+      saveEndpoint: '/TurnOnToggles'
+    }
+  };
+};
+
 interface ComparisonState {
   sessions: ComparisonSession[];
   activeSessionId: string | null;
@@ -112,13 +159,18 @@ interface ComparisonState {
   currentSaveEndpoint: string;
   comparisonType: 'settings' | 'codeTable' | 'featureToggle' | string; // Allow custom types
   customTypes: CustomComparisonType[];
-  builtInEndpoints: Record<string, { fetchEndpoint: string; saveEndpoint: string }>;
+  builtInEndpoints: Record<string, { 
+    fetchEndpoint: string; 
+    saveEndpoint: string;
+    requestBody?: Record<string, unknown>; // Optional request body parameters
+  }>;
   loading: boolean;
   error: string | null;
 }
 
 const loadedSessions = loadComparisonSessionsFromLocalStorage();
 const loadedCustomTypes = loadCustomTypesFromLocalStorage();
+const loadedBuiltInEndpoints = loadBuiltInEndpointsFromLocalStorage();
 
 const initialState: ComparisonState = {
   sessions: loadedSessions,
@@ -129,20 +181,7 @@ const initialState: ComparisonState = {
   currentSaveEndpoint: '/api/settings',
   comparisonType: 'settings',
   customTypes: loadedCustomTypes,
-  builtInEndpoints: {
-    settings: {
-      fetchEndpoint: '/api/fetch-settings',
-      saveEndpoint: '/api/save-settings'
-    },
-    codeTable: {
-      fetchEndpoint: '/api/fetch-code-table',
-      saveEndpoint: '/api/save-code-table'
-    },
-    featureToggle: {
-      fetchEndpoint: '/GetAllFeatureFlags',
-      saveEndpoint: '/TurnOnToggles'
-    }
-  },
+  builtInEndpoints: loadedBuiltInEndpoints,
   loading: false,
   error: null,
 };
@@ -663,14 +702,25 @@ const comparisonSlice = createSlice({
         }
       }
     },
-    updateBuiltInEndpoints: (state, action: PayloadAction<{ type: string; fetchEndpoint: string; saveEndpoint: string }>) => {
-      const { type, fetchEndpoint, saveEndpoint } = action.payload;
-      state.builtInEndpoints[type] = { fetchEndpoint, saveEndpoint };
+    updateBuiltInEndpoints: (state, action: PayloadAction<{ 
+      type: string; 
+      fetchEndpoint: string; 
+      saveEndpoint: string; 
+      requestBody?: Record<string, unknown> 
+    }>) => {
+      const { type, fetchEndpoint, saveEndpoint, requestBody } = action.payload;
+      state.builtInEndpoints[type] = { 
+        fetchEndpoint, 
+        saveEndpoint,
+        ...(requestBody ? { requestBody } : {})
+      };
       // Update current endpoints if this is the active type
       if (state.comparisonType === type) {
         state.currentFetchEndpoint = fetchEndpoint;
         state.currentSaveEndpoint = saveEndpoint;
       }
+      // Save to localStorage
+      saveBuiltInEndpointsToLocalStorage(state.builtInEndpoints);
     },
     addCustomComparisonType: (state, action: PayloadAction<Omit<CustomComparisonType, 'id' | 'createdAt'>>) => {
       const newType: CustomComparisonType = {

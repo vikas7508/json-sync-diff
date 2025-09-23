@@ -21,8 +21,8 @@ type LegacyComparisonResult = {
 
 const Summary: React.FC = () => {
   const dispatch = useAppDispatch();
-  const { sessions, activeSessionId, baseInstanceId, currentSaveEndpoint } = useAppSelector((state) => state.comparison);
-  const { instances, loading } = useAppSelector((state) => state.instances);
+  const { sessions, activeSessionId, baseInstanceId, currentSaveEndpoint, comparisonType, customTypes } = useAppSelector((state) => state.comparison);
+  const { instances, loading, instanceData } = useAppSelector((state) => state.instances);
   const { toast } = useToast();
   
   const [selectedForMigration, setSelectedForMigration] = useState<string[]>([]);
@@ -41,6 +41,69 @@ const Summary: React.FC = () => {
   const getInstanceName = (id: string) => {
     const instance = instances.find(i => i.id === id);
     return instance?.name || 'Unknown Instance';
+  };
+
+  // Helper to filter object based on response fields
+  const filterByResponseFields = (data: Record<string, unknown> | unknown[], responseFields: string[]): Record<string, unknown> => {
+    if (!responseFields || responseFields.length === 0) {
+      return Array.isArray(data) ? { data } : data as Record<string, unknown>; // Return all data if no response fields specified
+    }
+
+    // Handle array data (like feature toggles)
+    if (Array.isArray(data)) {
+      console.log('Filtering array data with', data.length, 'items');
+      // For arrays, we typically want to filter fields from the first item or all items
+      // Since the user provided example suggests single object structure, let's assume they want the first item
+      if (data.length > 0) {
+        const firstItem = data[0] as Record<string, unknown>;
+        return filterObjectFields(firstItem, responseFields);
+      }
+      return {};
+    }
+
+    // Handle object data
+    return filterObjectFields(data as Record<string, unknown>, responseFields);
+  };
+
+  // Helper to filter fields from a single object
+  const filterObjectFields = (obj: Record<string, unknown>, responseFields: string[]): Record<string, unknown> => {
+    const filtered: Record<string, unknown> = {};
+    
+    responseFields.forEach(field => {
+      if (field.includes('.')) {
+        // Handle nested fields like "user.name"
+        const parts = field.split('.');
+        let source = obj;
+        let target = filtered;
+        
+        // Navigate through the nested structure
+        for (let i = 0; i < parts.length - 1; i++) {
+          const part = parts[i];
+          if (source && typeof source === 'object' && part in source) {
+            source = source[part] as Record<string, unknown>;
+            if (!(part in target)) {
+              target[part] = {};
+            }
+            target = target[part] as Record<string, unknown>;
+          } else {
+            return; // Skip this field if path doesn't exist
+          }
+        }
+        
+        // Set the final value
+        const finalPart = parts[parts.length - 1];
+        if (source && typeof source === 'object' && finalPart in source) {
+          target[finalPart] = source[finalPart];
+        }
+      } else {
+        // Handle top-level fields
+        if (field in obj) {
+          filtered[field] = obj[field];
+        }
+      }
+    });
+    
+    return filtered;
   };
 
   const getFilteredResults = () => {
@@ -141,7 +204,193 @@ const Summary: React.FC = () => {
       return;
     }
 
-    // Build migration data from selected paths and source instance
+    // Check if using custom comparison type with response fields
+    const customType = customTypes?.find(type => type.id === comparisonType);
+    
+    console.log('🔍 Migration Debug:', {
+      comparisonType,
+      customTypeFound: !!customType,
+      customTypeName: customType?.name,
+      hasResponseFields: customType?.responseFields?.length > 0,
+      responseFields: customType?.responseFields,
+      identifierField: customType?.identifierField
+    });
+
+    // Check if we should use response field filtering
+    // This applies to custom types with response fields OR when we detect array-based data that looks like feature toggles
+    const sourceInstanceData = instanceData[migrationSource];
+    const isArrayBasedData = sourceInstanceData && Array.isArray(sourceInstanceData.data);
+    
+    console.log('🔍 Data Structure Analysis:', {
+      hasSourceData: !!sourceInstanceData,
+      dataType: sourceInstanceData ? (Array.isArray(sourceInstanceData.data) ? 'Array' : typeof sourceInstanceData.data) : 'none',
+      isArrayBasedData,
+      firstItem: isArrayBasedData ? (sourceInstanceData.data as unknown[])[0] : null,
+      hasFeatureNameInFirstItem: isArrayBasedData && 
+        (sourceInstanceData.data as unknown[]).length > 0 &&
+        typeof (sourceInstanceData.data as unknown[])[0] === 'object' &&
+        'FeatureName' in ((sourceInstanceData.data as unknown[])[0] as Record<string, unknown>)
+    });
+    
+    const hasFeatureToggleStructure = isArrayBasedData && 
+      (sourceInstanceData.data as unknown[]).length > 0 && 
+      typeof (sourceInstanceData.data as unknown[])[0] === 'object' &&
+      'FeatureName' in ((sourceInstanceData.data as unknown[])[0] as Record<string, unknown>);
+
+    const shouldUseResponseFieldFiltering = 
+      (customType && customType.responseFields && customType.responseFields.length > 0) ||
+      (comparisonType === 'featureToggle') ||
+      hasFeatureToggleStructure;
+
+    console.log('🔍 Response Field Filtering Debug:', {
+      isArrayBasedData,
+      hasFeatureToggleStructure,
+      shouldUseResponseFieldFiltering,
+      dataStructure: isArrayBasedData ? 'Array' : 'Object'
+    });
+
+    // For response field filtering logic (custom types, feature toggles, or auto-detected feature toggle structure)
+    if (shouldUseResponseFieldFiltering) {
+      console.log('✅ Using response field filtering logic');
+      
+      // Get the source instance data directly
+      if (!sourceInstanceData || !sourceInstanceData.data) {
+        toast({
+          title: "No Source Data",
+          description: "Source instance has no data available",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      console.log('📊 Source data type:', Array.isArray(sourceInstanceData.data) ? 'Array' : 'Object');
+      console.log('📊 Source data sample:', Array.isArray(sourceInstanceData.data) ? sourceInstanceData.data.slice(0, 2) : sourceInstanceData.data);
+
+      // Determine response fields and identifier field
+      let responseFields: string[] = [];
+      let identifierField: string | undefined;
+
+      if (customType && customType.responseFields && customType.responseFields.length > 0) {
+        responseFields = customType.responseFields;
+        identifierField = customType.identifierField;
+      } else if (comparisonType === 'featureToggle' || hasFeatureToggleStructure) {
+        // Default response fields for feature toggles
+        responseFields = ['FeatureName', 'CurrentValue'];
+        identifierField = 'FeatureName';
+      }
+
+      console.log('🔧 Using response fields:', responseFields);
+      console.log('🆔 Using identifier field:', identifierField);
+
+      let finalData: Record<string, unknown> | Record<string, unknown>[] = {};      if (identifierField && Array.isArray(sourceInstanceData.data)) {
+        // Handle array-based data (like feature toggles)
+        console.log('Processing array-based data with identifier field:', identifierField);
+        const sourceArray = sourceInstanceData.data as Record<string, unknown>[];
+        
+        // Collect all unique identifiers from selected paths
+        const selectedIdentifiers = new Set<string>();
+        selectedForMigration.forEach(path => {
+          // Extract identifier from path (e.g., "EnableInfoProtectionTrace.CurrentValue" -> "EnableInfoProtectionTrace")
+          const identifierValue = path.split('.')[0];
+          selectedIdentifiers.add(identifierValue);
+        });
+
+        console.log('Selected identifiers:', Array.from(selectedIdentifiers));
+
+        // Find and filter corresponding items
+        const selectedItems: Record<string, unknown>[] = [];
+        selectedIdentifiers.forEach(identifier => {
+          const sourceItem = sourceArray.find(item => 
+            item[identifierField!] === identifier
+          );
+          
+          if (sourceItem) {
+            const filteredItem = filterObjectFields(sourceItem, responseFields);
+            if (Object.keys(filteredItem).length > 0) {
+              selectedItems.push(filteredItem);
+            }
+          }
+        });
+
+        console.log('Selected and filtered items:', selectedItems);
+
+        // For multiple feature toggles, return them as an array within the Data object
+        if (selectedItems.length === 1) {
+          finalData = selectedItems[0];
+        } else if (selectedItems.length > 1) {
+          // Return as array for multiple items
+          finalData = selectedItems;
+        }
+      } else {
+        // Handle object-based data or custom types without identifier field
+        console.log('Processing object-based data');
+        
+        // Build migration data from selected paths
+        const migrationData: Record<string, unknown> = {};
+        
+        selectedForMigration.forEach(path => {
+          const result = activeSession.results.find(r => r.path === path);
+          if (result && hasResultValues(result)) {
+            const sourceValue = result.values[migrationSource];
+            if (sourceValue !== undefined && sourceValue !== 'MISSING') {
+              // Convert path like "config.theme" to nested object structure
+              const pathParts = path.split('.');
+              let current = migrationData;
+              
+              for (let i = 0; i < pathParts.length - 1; i++) {
+                const part = pathParts[i];
+                if (!(part in current)) {
+                  current[part] = {};
+                }
+                current = current[part] as Record<string, unknown>;
+              }
+              
+              current[pathParts[pathParts.length - 1]] = sourceValue;
+            }
+          }
+        });
+
+        // Apply response field filtering to the migration data
+        finalData = filterObjectFields(migrationData, responseFields);
+      }
+
+      console.log('Final migration data:', finalData);
+
+      if (Object.keys(finalData).length === 0) {
+        toast({
+          title: "No Data to Migrate",
+          description: "No matching data found for the selected response fields",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      try {
+        await dispatch(postInstanceData({
+          instanceId: migrationTarget,
+          endpoint: currentSaveEndpoint,
+          data: { Data: finalData }
+        }));
+
+        toast({
+          title: "Migration Successful",
+          description: `Selected fields migrated to ${getInstanceName(migrationTarget)}`,
+        });
+
+        setSelectedForMigration([]);
+        return;
+      } catch (error) {
+        toast({
+          title: "Migration Failed",
+          description: "Failed to migrate settings",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    // Original logic for built-in comparison types and custom types without response fields
+    console.log('⚠️  Using original migration logic (nested path structure)');
     const migrationData: Record<string, unknown> = {};
     
     // Extract values from the selected comparison results
@@ -182,9 +431,7 @@ const Summary: React.FC = () => {
       await dispatch(postInstanceData({
         instanceId: migrationTarget,
         endpoint: currentSaveEndpoint,
-        data: {
-          Data: migrationData
-        }
+        data: { Data: migrationData }
       }));
 
       toast({
