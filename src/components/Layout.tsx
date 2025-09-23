@@ -15,7 +15,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Configuration', href: '/', icon: Settings },
     { name: 'Compare', href: '/compare', icon: GitCompare },
     { name: 'Summary', href: '/summary', icon: BarChart3 },
-    { name: 'Config Management', href: '/config-management', icon: Database },
+    // { name: 'Config Management', href: '/config-management', icon: Database },
   ];
 
   const isActive = (path: string) => {

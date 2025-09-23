@@ -111,6 +111,26 @@ const Summary: React.FC = () => {
     }
   };
 
+  const handleSelectAllMigration = (checked: boolean) => {
+    if (checked) {
+      const allPaths = getFilteredResults().map(result => result.path);
+      setSelectedForMigration(allPaths);
+    } else {
+      setSelectedForMigration([]);
+    }
+  };
+
+  const isAllSelected = () => {
+    const filteredResults = getFilteredResults();
+    return filteredResults.length > 0 && filteredResults.every(result => selectedForMigration.includes(result.path));
+  };
+
+  const isIndeterminate = () => {
+    const filteredResults = getFilteredResults();
+    const selectedCount = filteredResults.filter(result => selectedForMigration.includes(result.path)).length;
+    return selectedCount > 0 && selectedCount < filteredResults.length;
+  };
+
   const handleMigration = async () => {
     if (!activeSession || !migrationTarget || !migrationSource || selectedForMigration.length === 0) {
       toast({
@@ -264,6 +284,86 @@ const Summary: React.FC = () => {
       {/* Active Session Details */}
       {activeSession && (
         <>
+                {/* Migration Controls */}
+        {activeSession && (
+          <Card className="border-primary/20">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <ArrowRight className="h-5 w-5 text-primary" />
+                <span>Configuration Migration</span>
+              </CardTitle>
+              <CardDescription>
+                Select differences to migrate between instances
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Source Instance</label>
+                  <Select value={migrationSource} onValueChange={setMigrationSource}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select source..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {activeSession.instanceIds.map((id) => (
+                        <SelectItem key={id} value={id}>
+                          {getInstanceName(id)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Target Instance</label>
+                  <Select value={migrationTarget} onValueChange={setMigrationTarget}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select target..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {activeSession.instanceIds
+                        .filter(id => id !== migrationSource)
+                        .map((id) => (
+                          <SelectItem key={id} value={id}>
+                            {getInstanceName(id)}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {selectedForMigration.length > 0 && (
+                <div className="flex items-center justify-between p-3 bg-primary/5 rounded-lg">
+                  <span className="text-sm">
+                    <strong>{selectedForMigration.length}</strong> of <strong>{getFilteredResults().length}</strong> settings selected for migration
+                    {getFilteredResults().length > 0 && selectedForMigration.length === getFilteredResults().length && (
+                      <span className="text-primary ml-1">(All selected)</span>
+                    )}
+                  </span>
+                  <Button
+                    onClick={handleMigration}
+                    disabled={loading || !migrationTarget || !migrationSource}
+                    size="sm"
+                  >
+                    {loading ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        Migrating...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" />
+                        Migrate Settings
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+        
           {/* Summary Statistics */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <Card 
@@ -335,93 +435,34 @@ const Summary: React.FC = () => {
             </Card>
           </div>
 
-        {/* Migration Controls */}
-        {activeSession && (
-          <Card className="border-primary/20">
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <ArrowRight className="h-5 w-5 text-primary" />
-                <span>Configuration Migration</span>
-              </CardTitle>
-              <CardDescription>
-                Select differences to migrate between instances
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Source Instance</label>
-                  <Select value={migrationSource} onValueChange={setMigrationSource}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select source..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {activeSession.instanceIds.map((id) => (
-                        <SelectItem key={id} value={id}>
-                          {getInstanceName(id)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Target Instance</label>
-                  <Select value={migrationTarget} onValueChange={setMigrationTarget}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select target..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {activeSession.instanceIds
-                        .filter(id => id !== migrationSource)
-                        .map((id) => (
-                          <SelectItem key={id} value={id}>
-                            {getInstanceName(id)}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {selectedForMigration.length > 0 && (
-                <div className="flex items-center justify-between p-3 bg-primary/5 rounded-lg">
-                  <span className="text-sm">
-                    <strong>{selectedForMigration.length}</strong> settings selected for migration
-                  </span>
-                  <Button
-                    onClick={handleMigration}
-                    disabled={loading || !migrationTarget || !migrationSource}
-                    size="sm"
-                  >
-                    {loading ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        Migrating...
-                      </>
-                    ) : (
-                      <>
-                        <Save className="h-4 w-4 mr-2" />
-                        Migrate Settings
-                      </>
-                    )}
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
         {/* Detailed Differences */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle>
-                  Detailed Differences
-                  <span className="ml-2 text-sm font-normal text-muted-foreground">
-                    ({getFilteredResults().length} {activeFilter === 'all' ? 'total' : activeFilter})
-                  </span>
-                </CardTitle>
+                <div className="flex items-center space-x-4">
+                  <CardTitle>
+                    Detailed Differences
+                    <span className="ml-2 text-sm font-normal text-muted-foreground">
+                      ({getFilteredResults().length} {activeFilter === 'all' ? 'total' : activeFilter})
+                    </span>
+                  </CardTitle>
+                  {getFilteredResults().length > 0 && (
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        checked={isAllSelected()}
+                        onCheckedChange={handleSelectAllMigration}
+                        className={isIndeterminate() ? "data-[state=checked]:bg-primary data-[state=checked]:border-primary" : ""}
+                        style={{
+                          backgroundColor: isIndeterminate() ? 'var(--primary)' : undefined,
+                          borderColor: isIndeterminate() ? 'var(--primary)' : undefined,
+                        }}
+                      />
+                      <label className="text-sm font-medium cursor-pointer" onClick={() => handleSelectAllMigration(!isAllSelected())}>
+                        Select All for Migration
+                      </label>
+                    </div>
+                  )}
+                </div>
                 {activeFilter !== 'all' && (
                   <Badge variant="outline" className="text-xs">
                     Filter: {activeFilter.charAt(0).toUpperCase() + activeFilter.slice(1)}
@@ -474,6 +515,10 @@ const Summary: React.FC = () => {
                         handleMigrationSelection(result.path, checked as boolean)
                       }
                     />
+                    {/* Migrate Label */}
+                  <span className="text-xs text-muted-foreground flex-shrink-0 pl-2">
+                    Migrate
+                  </span>
                   </div>
                   
                   {/* Type Icon */}
@@ -490,14 +535,11 @@ const Summary: React.FC = () => {
                   </Badge>
                   
                   {/* Path */}
-                  <code className="text-sm font-mono bg-muted px-2 py-1 rounded flex-1 min-w-0 truncate">
+                  <code className="text-sm font-mono px-2 py-1 rounded flex-1 min-w-0 truncate">
                     {result.path}
                   </code>
                   
-                  {/* Migrate Label */}
-                  <span className="text-xs text-muted-foreground flex-shrink-0">
-                    Migrate
-                  </span>
+                  
 
                   {/* Expand/Collapse Button */}
                   <div className="flex-shrink-0 p-1">
@@ -511,7 +553,7 @@ const Summary: React.FC = () => {
 
                 {/* Card Content - Collapsible */}
                 {isExpanded && (
-                  <div className="px-3 pb-3 border-t bg-muted/10">
+                  <div className="px-3 pb-3 border-t ">
                     <div className="pt-3 space-y-3">
                       {/* Description */}
                       <p className="text-sm text-muted-foreground italic">

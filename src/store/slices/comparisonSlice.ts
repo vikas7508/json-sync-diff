@@ -188,24 +188,39 @@ const compareFeatureToggles = (
     
     // Add result if there are differences or if it's a key feature
     if (hasDifference || affectedInstances.length !== instanceIds.length) {
-      const type: ComparisonResult['type'] = 'edited';
+      let type: ComparisonResult['type'] = 'edited';
       let description = '';
       
-      if (baseInstanceId && hasBaseValue) {
-        const missingInstances = instanceIds.filter(id => id !== baseInstanceId && values[id] === 'MISSING');
-        const differentInstances = instanceIds.filter(id => id !== baseInstanceId && values[id] !== baseValue && values[id] !== 'MISSING');
-        
-        if (missingInstances.length > 0 && differentInstances.length > 0) {
-          description = `Feature "${featureName}" has different values: base instance has ${baseValue}, missing in ${missingInstances.length} instance(s), different in ${differentInstances.length} instance(s)`;
-        } else if (missingInstances.length > 0) {
-          description = `Feature "${featureName}" is missing in ${missingInstances.length} instance(s) but present in base with value ${baseValue}`;
+      // Determine the type of difference
+      const missingInstances = instanceIds.filter(id => values[id] === 'MISSING');
+      const presentInstances = instanceIds.filter(id => values[id] !== 'MISSING');
+      
+      if (missingInstances.length > 0 && presentInstances.length > 0) {
+        // Some instances have the feature, others don't
+        if (baseInstanceId) {
+          if (values[baseInstanceId] === 'MISSING') {
+            type = 'added';
+            description = `Feature "${featureName}" added in ${presentInstances.length} instance(s) (not present in base)`;
+          } else {
+            type = 'deleted';
+            description = `Feature "${featureName}" deleted in ${missingInstances.length} instance(s) (present in base with value ${baseValue})`;
+          }
         } else {
-          description = `Feature "${featureName}" differs from base value ${baseValue} in ${differentInstances.length} instance(s)`;
+          // No base instance defined
+          if (missingInstances.length < presentInstances.length) {
+            type = 'added';
+            description = `Feature "${featureName}" added in ${presentInstances.length} instance(s), missing in ${missingInstances.length}`;
+          } else {
+            type = 'deleted';
+            description = `Feature "${featureName}" deleted in ${missingInstances.length} instance(s), present in ${presentInstances.length}`;
+          }
         }
-      } else {
-        const missingCount = Object.values(values).filter(v => v === 'MISSING').length;
-        if (missingCount > 0) {
-          description = `Feature "${featureName}" is missing in ${missingCount} instance(s)`;
+      } else if (presentInstances.length === instanceIds.length) {
+        // Present in all instances but with different values
+        type = 'edited';
+        if (baseInstanceId && hasBaseValue) {
+          const differentInstances = instanceIds.filter(id => id !== baseInstanceId && values[id] !== baseValue);
+          description = `Feature "${featureName}" differs from base value ${baseValue} in ${differentInstances.length} instance(s)`;
         } else {
           description = `Feature "${featureName}" has inconsistent values across instances`;
         }
@@ -283,24 +298,39 @@ const compareGenericData = (
     
     // Add result if there are differences
     if (hasDifference) {
-      const type: ComparisonResult['type'] = 'edited';
+      let type: ComparisonResult['type'] = 'edited';
       let description = '';
       
-      if (baseInstanceId && hasBaseValue) {
-        const missingInstances = instanceIds.filter(id => id !== baseInstanceId && values[id] === 'MISSING');
-        const differentInstances = instanceIds.filter(id => id !== baseInstanceId && JSON.stringify(values[id]) !== JSON.stringify(baseValue) && values[id] !== 'MISSING');
-        
-        if (missingInstances.length > 0 && differentInstances.length > 0) {
-          description = `Setting at "${path}" differs from base: missing in ${missingInstances.length} instance(s), different in ${differentInstances.length} instance(s)`;
-        } else if (missingInstances.length > 0) {
-          description = `Setting at "${path}" is missing in ${missingInstances.length} instance(s) but present in base`;
+      // Determine the type of difference
+      const missingInstances = instanceIds.filter(id => values[id] === 'MISSING');
+      const presentInstances = instanceIds.filter(id => values[id] !== 'MISSING');
+      
+      if (missingInstances.length > 0 && presentInstances.length > 0) {
+        // Some instances have the setting, others don't
+        if (baseInstanceId) {
+          if (values[baseInstanceId] === 'MISSING') {
+            type = 'added';
+            description = `Setting at "${path}" added in ${presentInstances.length} instance(s) (not present in base)`;
+          } else {
+            type = 'deleted';
+            description = `Setting at "${path}" deleted in ${missingInstances.length} instance(s) (present in base)`;
+          }
         } else {
-          description = `Setting at "${path}" differs from base value in ${differentInstances.length} instance(s)`;
+          // No base instance defined
+          if (missingInstances.length < presentInstances.length) {
+            type = 'added';
+            description = `Setting at "${path}" added in ${presentInstances.length} instance(s), missing in ${missingInstances.length}`;
+          } else {
+            type = 'deleted';
+            description = `Setting at "${path}" deleted in ${missingInstances.length} instance(s), present in ${presentInstances.length}`;
+          }
         }
-      } else {
-        const missingCount = Object.values(values).filter(v => v === 'MISSING').length;
-        if (missingCount > 0) {
-          description = `Setting at "${path}" is missing in ${missingCount} instance(s)`;
+      } else if (presentInstances.length === instanceIds.length) {
+        // Present in all instances but with different values
+        type = 'edited';
+        if (baseInstanceId && hasBaseValue) {
+          const differentInstances = instanceIds.filter(id => id !== baseInstanceId && JSON.stringify(values[id]) !== JSON.stringify(baseValue));
+          description = `Setting at "${path}" differs from base value in ${differentInstances.length} instance(s)`;
         } else {
           description = `Setting at "${path}" has inconsistent values across instances`;
         }

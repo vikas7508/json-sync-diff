@@ -7,17 +7,20 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
 import { fetchInstanceData } from '@/store/slices/instancesSlice';
 import { setSelectedInstances, setBaseInstanceId, setComparisonType, createComparisonSession, ComparisonData } from '@/store/slices/comparisonSlice';
-import { GitCompare, Settings, Database, ToggleLeft, Play, Loader2 } from 'lucide-react';
+import { GitCompare, Settings, Database, ToggleLeft, Play, Loader2, Copy, Check } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useNavigate } from 'react-router-dom';
 import ReactJson from "@microlink/react-json-view";
 
 const Compare: React.FC = () => {
   const dispatch = useAppDispatch();
+  const navigate = useNavigate();
   const { instances, instanceData, loading } = useAppSelector((state) => state.instances);
     const { selectedInstances, baseInstanceId, comparisonType, currentEndpoint } = useAppSelector((state) => state.comparison);
   const { toast } = useToast();
   
   const [sessionName, setSessionName] = useState('');
+  const [copiedInstances, setCopiedInstances] = useState<Set<string>>(new Set());
 
   const activeInstances = instances.filter(i => i.isActive);
 
@@ -120,11 +123,46 @@ const Compare: React.FC = () => {
 
     toast({
       title: "Comparison Started",
-      description: "Analysis complete! Check the Summary page for results.",
+      description: "Analysis complete! Redirecting to Summary page...",
     });
+
+    // Navigate to Summary page after comparison is created
+    setTimeout(() => {
+      navigate('/summary');
+    }, 1000); // Small delay to let user see the success message
   };
 
   const getInstanceById = (id: string) => instances.find(i => i.id === id);
+
+  const handleCopyToClipboard = async (instanceId: string) => {
+    const data = instanceData[instanceId];
+    if (data?.data) {
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(data.data, null, 2));
+        setCopiedInstances(prev => new Set([...prev, instanceId]));
+        
+        toast({
+          title: "Copied to Clipboard",
+          description: `JSON data from ${getInstanceById(instanceId)?.name} copied successfully`,
+        });
+
+        // Reset the copied state after 2 seconds
+        setTimeout(() => {
+          setCopiedInstances(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(instanceId);
+            return newSet;
+          });
+        }, 2000);
+      } catch (error) {
+        toast({
+          title: "Copy Failed",
+          description: "Failed to copy data to clipboard",
+          variant: "destructive",
+        });
+      }
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -336,11 +374,27 @@ const Compare: React.FC = () => {
                 
                 return (
                   <div key={instanceId} className="space-y-2">
-                    <h4 className="font-medium text-sm">{instance?.name}</h4>
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-medium text-sm">{instance?.name}</h4>
+                      {data?.data && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleCopyToClipboard(instanceId)}
+                          className="h-7 px-2"
+                        >
+                          {copiedInstances.has(instanceId) ? (
+                            <Check className="h-3 w-3 text-success" />
+                          ) : (
+                            <Copy className="h-3 w-3" />
+                          )}
+                        </Button>
+                      )}
+                    </div>
                     <div className="max-h-64 overflow-auto rounded border bg-muted/30 p-2">
                       {data?.data ? (
                         <ReactJson
-                          src={data.data}
+                          src={data.data as object}
                           theme="bright"
                           collapsed={2}
                           displayDataTypes={false}
