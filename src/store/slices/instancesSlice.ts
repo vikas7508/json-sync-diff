@@ -90,6 +90,7 @@ export const fetchInstanceData = createAsyncThunk(
       headers: {
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify({ action: 'fetch' }),
     });
 
     if (!response.ok) {
@@ -117,10 +118,9 @@ export const postInstanceData = createAsyncThunk(
       throw new Error('Instance not found');
     }
 
-    const response = await fetch(`${instance.url}${endpoint}`, {
+    const response = await fetch(`${instance.url}${endpoint}?authkey=${instance.authKey}`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${instance.authKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(data),

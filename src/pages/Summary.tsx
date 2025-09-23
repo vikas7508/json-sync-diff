@@ -21,7 +21,7 @@ type LegacyComparisonResult = {
 
 const Summary: React.FC = () => {
   const dispatch = useAppDispatch();
-  const { sessions, activeSessionId, baseInstanceId } = useAppSelector((state) => state.comparison);
+  const { sessions, activeSessionId, baseInstanceId, currentSaveEndpoint } = useAppSelector((state) => state.comparison);
   const { instances, loading } = useAppSelector((state) => state.instances);
   const { toast } = useToast();
   
@@ -141,16 +141,50 @@ const Summary: React.FC = () => {
       return;
     }
 
-    // Build migration data from selected paths
+    // Build migration data from selected paths and source instance
     const migrationData: Record<string, unknown> = {};
-    // This is a simplified version - you'd need to properly extract the values
-    // from the source instance data based on the selected paths
+    
+    // Extract values from the selected comparison results
+    selectedForMigration.forEach(path => {
+      const result = activeSession.results.find(r => r.path === path);
+      if (result && hasResultValues(result)) {
+        // Get the value from the source instance
+        const sourceValue = result.values[migrationSource];
+        if (sourceValue !== undefined && sourceValue !== 'MISSING') {
+          // Convert path like "config.theme" to nested object structure
+          const pathParts = path.split('.');
+          let current = migrationData;
+          
+          for (let i = 0; i < pathParts.length - 1; i++) {
+            const part = pathParts[i];
+            if (!(part in current)) {
+              current[part] = {};
+            }
+            current = current[part] as Record<string, unknown>;
+          }
+          
+          // Set the final value
+          current[pathParts[pathParts.length - 1]] = sourceValue;
+        }
+      }
+    });
+
+    if (Object.keys(migrationData).length === 0) {
+      toast({
+        title: "No Data to Migrate",
+        description: "No valid data found in source instance for selected settings",
+        variant: "destructive",
+      });
+      return;
+    }
     
     try {
       await dispatch(postInstanceData({
         instanceId: migrationTarget,
-        endpoint: activeSession.endpoint,
-        data: migrationData
+        endpoint: currentSaveEndpoint,
+        data: {
+          Data: migrationData
+        }
       }));
 
       toast({
@@ -363,7 +397,7 @@ const Summary: React.FC = () => {
             </CardContent>
           </Card>
         )}
-        
+
           {/* Summary Statistics */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <Card 

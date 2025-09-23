@@ -12,7 +12,7 @@ import { useToast } from '@/hooks/use-toast';
 const ConfigManagement: React.FC = () => {
   const dispatch = useAppDispatch();
   const { instances, instanceData, loading } = useAppSelector((state) => state.instances);
-  const { activeSessionId, sessions } = useAppSelector((state) => state.comparison);
+  const { activeSessionId, sessions, currentSaveEndpoint } = useAppSelector((state) => state.comparison);
   const { toast } = useToast();
 
   const [sourceInstanceId, setSourceInstanceId] = useState<string>('');
@@ -104,14 +104,13 @@ const ConfigManagement: React.FC = () => {
     }
 
     const migrationData = buildMigrationData();
-    const endpoint = '/api/settings'; // You can make this configurable
 
     try {
       // Migrate to all selected target instances
       const migrationPromises = targetInstanceIds.map(targetId => 
         dispatch(postInstanceData({
           instanceId: targetId,
-          endpoint,
+          endpoint: currentSaveEndpoint,
           data: migrationData
         }))
       );

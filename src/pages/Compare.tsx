@@ -4,10 +4,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
 import { fetchInstanceData } from '@/store/slices/instancesSlice';
-import { setSelectedInstances, setBaseInstanceId, setComparisonType, createComparisonSession, ComparisonData } from '@/store/slices/comparisonSlice';
-import { GitCompare, Settings, Database, ToggleLeft, Play, Loader2, Copy, Check } from 'lucide-react';
+import { setSelectedInstances, setBaseInstanceId, setComparisonType, createComparisonSession, ComparisonData, addCustomComparisonType, updateCustomComparisonType, deleteCustomComparisonType, updateBuiltInEndpoints } from '@/store/slices/comparisonSlice';
+import { GitCompare, Settings, Database, ToggleLeft, Play, Loader2, Copy, Check, Plus, Trash2, Edit } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
 import ReactJson from "@microlink/react-json-view";
@@ -16,11 +20,25 @@ const Compare: React.FC = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const { instances, instanceData, loading } = useAppSelector((state) => state.instances);
-    const { selectedInstances, baseInstanceId, comparisonType, currentEndpoint } = useAppSelector((state) => state.comparison);
+  const { selectedInstances, baseInstanceId, comparisonType, currentFetchEndpoint, currentSaveEndpoint, customTypes, builtInEndpoints } = useAppSelector((state) => state.comparison);
   const { toast } = useToast();
   
   const [sessionName, setSessionName] = useState('');
   const [copiedInstances, setCopiedInstances] = useState<Set<string>>(new Set());
+  const [showCustomTypeDialog, setShowCustomTypeDialog] = useState(false);
+  const [showEditEndpointsDialog, setShowEditEndpointsDialog] = useState(false);
+  const [editingType, setEditingType] = useState<string>('');
+  const [editingEndpoints, setEditingEndpoints] = useState({ fetchEndpoint: '', saveEndpoint: '' });
+  const [newCustomType, setNewCustomType] = useState({
+    name: '',
+    label: '',
+    fetchEndpoint: '',
+    saveEndpoint: '',
+    description: '',
+    sampleData: '',
+    comparisonFields: [] as string[],
+    identifierField: '',
+  });
 
   const activeInstances = instances.filter(i => i.isActive);
 
@@ -29,23 +47,36 @@ const Compare: React.FC = () => {
       value: 'settings', 
       label: 'Settings', 
       icon: Settings, 
-      endpoint: '/api/settings',
+      fetchEndpoint: '/api/settings',
+      saveEndpoint: '/TurnOn',
       description: 'Compare application configuration settings'
     },
     { 
       value: 'codeTable', 
       label: 'Code Tables', 
       icon: Database, 
-      endpoint: '/api/code-table',
+      fetchEndpoint: '/api/code-table',
+      saveEndpoint: '/TurnOn',
       description: 'Compare lookup tables and reference data'
     },
     { 
       value: 'featureToggle', 
       label: 'Feature Toggles', 
       icon: ToggleLeft, 
-      endpoint: '/GetAllFeatureFlags',
+      fetchEndpoint: '/GetAllFeatureFlags',
+      saveEndpoint: '/TurnOnToggles',
       description: 'Compare feature flags and toggles'
     },
+    // Add custom types
+    ...(customTypes || []).map(customType => ({
+      value: customType.id,
+      label: customType.label,
+      icon: Database, // Default icon for custom types
+      fetchEndpoint: customType.fetchEndpoint,
+      saveEndpoint: customType.saveEndpoint,
+      description: customType.description,
+      isCustom: true,
+    })),
   ];
 
   const handleInstanceSelection = (instanceId: string, checked: boolean) => {
@@ -55,8 +86,196 @@ const Compare: React.FC = () => {
     dispatch(setSelectedInstances(updated));
   };
 
-  const handleComparisonTypeChange = (type: 'settings' | 'codeTable' | 'featureToggle') => {
+  const handleComparisonTypeChange = (type: 'settings' | 'codeTable' | 'featureToggle' | string) => {
     dispatch(setComparisonType(type));
+  };
+
+  const handleCreateCustomType = () => {
+    if (!newCustomType.name || !newCustomType.label || !newCustomType.fetchEndpoint || !newCustomType.saveEndpoint) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill in all required fields",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let parsedSampleData;
+    try {
+      parsedSampleData = JSON.parse(newCustomType.sampleData);
+    } catch (error) {
+      toast({
+        title: "Invalid JSON",
+        description: "Please provide valid JSON sample data",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const fields = newCustomType.comparisonFields.filter(f => f.trim());
+    if (fields.length === 0) {
+      toast({
+        title: "Validation Error",
+        description: "Please specify at least one comparison field",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    dispatch(addCustomComparisonType({
+      name: newCustomType.name,
+      label: newCustomType.label,
+      fetchEndpoint: newCustomType.fetchEndpoint,
+      saveEndpoint: newCustomType.saveEndpoint,
+      description: newCustomType.description,
+      sampleData: parsedSampleData,
+      comparisonFields: fields,
+      identifierField: newCustomType.identifierField || undefined,
+    }));
+
+    // Reset form and close dialog
+    setNewCustomType({
+      name: '',
+      label: '',
+      fetchEndpoint: '',
+      saveEndpoint: '',
+      description: '',
+      sampleData: '',
+      comparisonFields: [],
+      identifierField: '',
+    });
+    setShowCustomTypeDialog(false);
+
+    toast({
+      title: "Custom Type Created",
+      description: `${newCustomType.label} comparison type has been created successfully`,
+    });
+  };
+
+  const handleDeleteCustomType = (customTypeId: string) => {
+    const customType = customTypes?.find(t => t.id === customTypeId);
+    dispatch(deleteCustomComparisonType(customTypeId));
+    
+    toast({
+      title: "Custom Type Deleted",
+      description: `${customType?.label || 'Custom type'} has been deleted`,
+    });
+  };
+
+  const handleEditBuiltInType = (typeName: string) => {
+    const config = builtInEndpoints[typeName];
+    if (config) {
+      setEditingType(typeName);
+      setEditingEndpoints({
+        fetchEndpoint: config.fetchEndpoint,
+        saveEndpoint: config.saveEndpoint
+      });
+      setShowEditEndpointsDialog(true);
+    }
+  };
+
+  const handleEditCustomType = (customTypeId: string) => {
+    const customType = customTypes?.find(t => t.id === customTypeId);
+    if (customType) {
+      setNewCustomType({
+        name: customType.name,
+        label: customType.label,
+        fetchEndpoint: customType.fetchEndpoint,
+        saveEndpoint: customType.saveEndpoint,
+        description: customType.description,
+        sampleData: JSON.stringify(customType.sampleData, null, 2),
+        comparisonFields: customType.comparisonFields,
+        identifierField: customType.identifierField || '',
+      });
+      setEditingType(customTypeId);
+      setShowCustomTypeDialog(true);
+    }
+  };
+
+  const handleUpdateBuiltInEndpoints = () => {
+    if (editingType && editingEndpoints.fetchEndpoint && editingEndpoints.saveEndpoint) {
+      dispatch(updateBuiltInEndpoints({
+        type: editingType,
+        fetchEndpoint: editingEndpoints.fetchEndpoint,
+        saveEndpoint: editingEndpoints.saveEndpoint
+      }));
+      
+      toast({
+        title: "Endpoints Updated",
+        description: `${editingType} endpoints have been updated`,
+      });
+      
+      setShowEditEndpointsDialog(false);
+      setEditingType('');
+      setEditingEndpoints({ fetchEndpoint: '', saveEndpoint: '' });
+    }
+  };
+
+  const handleUpdateCustomType = () => {
+    if (editingType) {
+      const customType = customTypes?.find(t => t.id === editingType);
+      if (customType) {
+        dispatch(updateCustomComparisonType({
+          ...customType,
+          name: newCustomType.name,
+          label: newCustomType.label,
+          fetchEndpoint: newCustomType.fetchEndpoint,
+          saveEndpoint: newCustomType.saveEndpoint,
+          description: newCustomType.description,
+          sampleData: JSON.parse(newCustomType.sampleData),
+          comparisonFields: newCustomType.comparisonFields,
+          identifierField: newCustomType.identifierField || undefined,
+        }));
+        
+        toast({
+          title: "Custom Type Updated",
+          description: `${newCustomType.label} has been updated`,
+        });
+        
+        setShowCustomTypeDialog(false);
+        setEditingType('');
+        setNewCustomType({
+          name: '',
+          label: '',
+          fetchEndpoint: '',
+          saveEndpoint: '',
+          description: '',
+          sampleData: '',
+          comparisonFields: [],
+          identifierField: '',
+        });
+      }
+    }
+  };
+
+  const extractFieldsFromSampleData = (jsonData: string) => {
+    try {
+      const parsed = JSON.parse(jsonData);
+      const paths: string[] = [];
+      
+      const traverse = (obj: unknown, currentPath: string = '') => {
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+          Object.keys(obj as Record<string, unknown>).forEach(key => {
+            const newPath = currentPath ? `${currentPath}.${key}` : key;
+            paths.push(newPath);
+            const value = (obj as Record<string, unknown>)[key];
+            if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+              traverse(value, newPath);
+            }
+          });
+        }
+      };
+      
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        traverse(parsed[0]);
+      } else {
+        traverse(parsed);
+      }
+      
+      return paths;
+    } catch {
+      return [];
+    }
   };
 
   const handleBaseInstanceChange = (instanceId: string) => {
@@ -76,7 +295,7 @@ const Compare: React.FC = () => {
     try {
       // Fetch data from all selected instances
       const fetchPromises = selectedInstances.map(instanceId => 
-        dispatch(fetchInstanceData({ instanceId, endpoint: currentEndpoint }))
+        dispatch(fetchInstanceData({ instanceId, endpoint: currentFetchEndpoint }))
       );
       
       await Promise.all(fetchPromises);
@@ -117,7 +336,7 @@ const Compare: React.FC = () => {
     dispatch(createComparisonSession({
       name,
       instanceIds: selectedInstances,
-      endpoint: currentEndpoint,
+      endpoint: currentFetchEndpoint,
       instanceData: selectedInstanceData,
     }));
 
@@ -177,8 +396,240 @@ const Compare: React.FC = () => {
       {/* Comparison Type Selection */}
       <Card>
         <CardHeader>
-          <CardTitle>Comparison Type</CardTitle>
-          <CardDescription>Choose what type of data you want to compare</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Comparison Type</CardTitle>
+              <CardDescription>Choose what type of data you want to compare</CardDescription>
+            </div>
+            <Dialog open={showCustomTypeDialog} onOpenChange={setShowCustomTypeDialog}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create Custom Type
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>
+                    {editingType ? 'Edit Custom Comparison Type' : 'Create Custom Comparison Type'}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {editingType 
+                      ? 'Modify the settings for this custom comparison type'
+                      : 'Define a new comparison type with custom JSON structure and comparison fields'
+                    }
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="type-name">Name *</Label>
+                      <Input
+                        id="type-name"
+                        placeholder="e.g., userSettings"
+                        value={newCustomType.name}
+                        onChange={(e) => setNewCustomType({ ...newCustomType, name: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="type-label">Display Label *</Label>
+                      <Input
+                        id="type-label"
+                        placeholder="e.g., User Settings"
+                        value={newCustomType.label}
+                        onChange={(e) => setNewCustomType({ ...newCustomType, label: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="type-fetch-endpoint">Fetch Endpoint *</Label>
+                    <Input
+                      id="type-fetch-endpoint"
+                      placeholder="e.g., /api/fetch-user-settings"
+                      value={newCustomType.fetchEndpoint}
+                      onChange={(e) => setNewCustomType({ ...newCustomType, fetchEndpoint: e.target.value })}
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="type-save-endpoint">Save Endpoint *</Label>
+                    <Input
+                      id="type-save-endpoint"
+                      placeholder="e.g., /api/save-user-settings"
+                      value={newCustomType.saveEndpoint}
+                      onChange={(e) => setNewCustomType({ ...newCustomType, saveEndpoint: e.target.value })}
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="type-description">Description</Label>
+                    <Input
+                      id="type-description"
+                      placeholder="Brief description of this comparison type"
+                      value={newCustomType.description}
+                      onChange={(e) => setNewCustomType({ ...newCustomType, description: e.target.value })}
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="sample-data">Sample JSON Data *</Label>
+                    <Textarea
+                      id="sample-data"
+                      placeholder='Paste sample JSON here, e.g., {"settings": {"theme": "dark"}, "preferences": {"notifications": true}}'
+                      value={newCustomType.sampleData}
+                      onChange={(e) => {
+                        setNewCustomType({ ...newCustomType, sampleData: e.target.value });
+                        // Auto-extract fields when valid JSON is pasted
+                        const fields = extractFieldsFromSampleData(e.target.value);
+                        if (fields.length > 0) {
+                          setNewCustomType(prev => ({ ...prev, comparisonFields: fields }));
+                        }
+                      }}
+                      className="min-h-[120px] font-mono"
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="identifier-field">Identifier Field (for arrays)</Label>
+                    <Input
+                      id="identifier-field"
+                      placeholder="e.g., id, name, key (leave empty for object comparison)"
+                      value={newCustomType.identifierField}
+                      onChange={(e) => setNewCustomType({ ...newCustomType, identifierField: e.target.value })}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      If your data is an array of objects, specify the field that uniquely identifies each item
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <Label>Comparison Fields *</Label>
+                    <div className="space-y-2 mt-2">
+                      {newCustomType.comparisonFields.map((field, index) => (
+                        <div key={index} className="flex items-center space-x-2">
+                          <Input
+                            value={field}
+                            onChange={(e) => {
+                              const newFields = [...newCustomType.comparisonFields];
+                              newFields[index] = e.target.value;
+                              setNewCustomType({ ...newCustomType, comparisonFields: newFields });
+                            }}
+                            placeholder="Field path (e.g., settings.theme)"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const newFields = newCustomType.comparisonFields.filter((_, i) => i !== index);
+                              setNewCustomType({ ...newCustomType, comparisonFields: newFields });
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setNewCustomType({ 
+                            ...newCustomType, 
+                            comparisonFields: [...newCustomType.comparisonFields, ''] 
+                          });
+                        }}
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Field
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Specify which fields to compare. Use dot notation for nested fields (e.g., "user.preferences.theme")
+                    </p>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => {
+                    setShowCustomTypeDialog(false);
+                    setEditingType('');
+                    setNewCustomType({
+                      name: '',
+                      label: '',
+                      fetchEndpoint: '',
+                      saveEndpoint: '',
+                      description: '',
+                      sampleData: '',
+                      comparisonFields: [],
+                      identifierField: '',
+                    });
+                  }}>
+                    Cancel
+                  </Button>
+                  <Button onClick={editingType ? handleUpdateCustomType : handleCreateCustomType}>
+                    {editingType ? 'Update Type' : 'Create Type'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Built-in Endpoints Edit Dialog */}
+            <Dialog open={showEditEndpointsDialog} onOpenChange={setShowEditEndpointsDialog}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Edit {editingType} Endpoints</DialogTitle>
+                  <DialogDescription>
+                    Configure the fetch and save endpoints for {editingType}
+                  </DialogDescription>
+                </DialogHeader>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="edit-fetch-endpoint">Fetch Endpoint *</Label>
+                    <Input
+                      id="edit-fetch-endpoint"
+                      placeholder="e.g., /api/fetch-settings"
+                      value={editingEndpoints.fetchEndpoint}
+                      onChange={(e) => setEditingEndpoints({ 
+                        ...editingEndpoints, 
+                        fetchEndpoint: e.target.value 
+                      })}
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="edit-save-endpoint">Save Endpoint *</Label>
+                    <Input
+                      id="edit-save-endpoint"
+                      placeholder="e.g., /api/save-settings"
+                      value={editingEndpoints.saveEndpoint}
+                      onChange={(e) => setEditingEndpoints({ 
+                        ...editingEndpoints, 
+                        saveEndpoint: e.target.value 
+                      })}
+                    />
+                  </div>
+                </div>
+
+                <DialogFooter>
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      setShowEditEndpointsDialog(false);
+                      setEditingType('');
+                      setEditingEndpoints({ fetchEndpoint: '', saveEndpoint: '' });
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button onClick={handleUpdateBuiltInEndpoints}>
+                    Update Endpoints
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -192,18 +643,52 @@ const Compare: React.FC = () => {
                   className={`cursor-pointer transition-all hover:shadow-md ${
                     isSelected ? 'border-primary bg-primary/5' : ''
                   }`}
-                  onClick={() => handleComparisonTypeChange(type.value as 'settings' | 'codeTable' | 'featureToggle')}
+                  onClick={() => handleComparisonTypeChange(type.value)}
                 >
                   <CardContent className="p-4">
-                    <div className="flex items-center space-x-3">
-                      <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                        isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted'
-                      }`}>
-                        <Icon className="h-5 w-5" />
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
+                          isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted'
+                        }`}>
+                          <Icon className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h3 className="font-medium">{type.label}</h3>
+                          <p className="text-xs text-muted-foreground mt-1">{type.description}</p>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-medium">{type.label}</h3>
-                        <p className="text-xs text-muted-foreground mt-1">{type.description}</p>
+                      <div className="flex items-center space-x-2">
+                        {/* Edit button for all types */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if ('isCustom' in type && type.isCustom) {
+                              handleEditCustomType(type.value);
+                            } else {
+                              handleEditBuiltInType(type.value);
+                            }
+                          }}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        {/* Delete button only for custom types */}
+                        {'isCustom' in type && type.isCustom && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteCustomType(type.value);
+                            }}
+                            className="text-destructive hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </CardContent>

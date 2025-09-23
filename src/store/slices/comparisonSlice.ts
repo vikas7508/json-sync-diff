@@ -26,6 +26,20 @@ export interface CodeTableData {
 // Union type for all data types
 export type ComparisonData = FeatureToggle[] | SettingsData | CodeTableData;
 
+// Custom comparison type interface
+export interface CustomComparisonType {
+  id: string;
+  name: string;
+  label: string;
+  fetchEndpoint: string;
+  saveEndpoint: string;
+  description: string;
+  sampleData: object;
+  comparisonFields: string[];
+  identifierField?: string; // For array-based data like feature toggles
+  createdAt: string;
+}
+
 export interface ComparisonResult {
   path: string;
   type: 'added' | 'deleted' | 'edited' | 'unchanged';
@@ -51,6 +65,7 @@ export interface ComparisonSession {
 
 // Local storage utilities
 const COMPARISON_STORAGE_KEY = 'json-sync-diff-comparison-sessions';
+const CUSTOM_TYPES_STORAGE_KEY = 'json-sync-diff-custom-types';
 
 const saveComparisonSessionsToLocalStorage = (sessions: ComparisonSession[]) => {
   try {
@@ -70,26 +85,64 @@ const loadComparisonSessionsFromLocalStorage = (): ComparisonSession[] => {
   }
 };
 
+const saveCustomTypesToLocalStorage = (customTypes: CustomComparisonType[]) => {
+  try {
+    localStorage.setItem(CUSTOM_TYPES_STORAGE_KEY, JSON.stringify(customTypes));
+  } catch (error) {
+    console.error('Failed to save custom types to localStorage:', error);
+  }
+};
+
+const loadCustomTypesFromLocalStorage = (): CustomComparisonType[] => {
+  try {
+    const stored = localStorage.getItem(CUSTOM_TYPES_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch (error) {
+    console.error('Failed to load custom types from localStorage:', error);
+    return [];
+  }
+};
+
 interface ComparisonState {
   sessions: ComparisonSession[];
   activeSessionId: string | null;
   selectedInstances: string[];
   baseInstanceId: string | null;
-  currentEndpoint: string;
-  comparisonType: 'settings' | 'codeTable' | 'featureToggle';
+  currentFetchEndpoint: string;
+  currentSaveEndpoint: string;
+  comparisonType: 'settings' | 'codeTable' | 'featureToggle' | string; // Allow custom types
+  customTypes: CustomComparisonType[];
+  builtInEndpoints: Record<string, { fetchEndpoint: string; saveEndpoint: string }>;
   loading: boolean;
   error: string | null;
 }
 
 const loadedSessions = loadComparisonSessionsFromLocalStorage();
+const loadedCustomTypes = loadCustomTypesFromLocalStorage();
 
 const initialState: ComparisonState = {
   sessions: loadedSessions,
   activeSessionId: loadedSessions[0]?.id || null,
   selectedInstances: [],
   baseInstanceId: null,
-  currentEndpoint: '/api/settings',
+  currentFetchEndpoint: '/api/settings',
+  currentSaveEndpoint: '/api/settings',
   comparisonType: 'settings',
+  customTypes: loadedCustomTypes,
+  builtInEndpoints: {
+    settings: {
+      fetchEndpoint: '/api/fetch-settings',
+      saveEndpoint: '/api/save-settings'
+    },
+    codeTable: {
+      fetchEndpoint: '/api/fetch-code-table',
+      saveEndpoint: '/api/save-code-table'
+    },
+    featureToggle: {
+      fetchEndpoint: '/GetAllFeatureFlags',
+      saveEndpoint: '/TurnOnToggles'
+    }
+  },
   loading: false,
   error: null,
 };
@@ -349,6 +402,237 @@ const compareGenericData = (
   return results;
 };
 
+// Custom comparison function for array-based custom types
+const compareCustomArrayData = (
+  instanceData: Record<string, Record<string, unknown>[]>,
+  instanceIds: string[],
+  customType: CustomComparisonType,
+  baseInstanceId?: string
+): ComparisonResult[] => {
+  const results: ComparisonResult[] = [];
+  
+  if (!customType.identifierField) return results;
+  
+  // Create a map of all unique items across all instances
+  const allItemIds = new Set<string>();
+  const instanceItemMaps = new Map<string, Map<string, Record<string, unknown>>>();
+  
+  // Build item maps for each instance
+  instanceIds.forEach(instanceId => {
+    const items = instanceData[instanceId] || [];
+    const itemMap = new Map<string, Record<string, unknown>>();
+    
+    items.forEach(item => {
+      const identifier = String(item[customType.identifierField!]);
+      if (identifier) {
+        allItemIds.add(identifier);
+        itemMap.set(identifier, item);
+      }
+    });
+    
+    instanceItemMaps.set(instanceId, itemMap);
+  });
+  
+  // Compare each item across all instances
+  allItemIds.forEach(itemId => {
+    const values: Record<string, unknown> = {};
+    const affectedInstances: string[] = [];
+    let hasBaseValue = false;
+    let baseValue: unknown;
+    let hasDifference = false;
+    
+    // Collect values from all instances for comparison fields
+    instanceIds.forEach(instanceId => {
+      const itemMap = instanceItemMaps.get(instanceId);
+      const item = itemMap?.get(itemId);
+      
+      if (item) {
+        const itemValues: Record<string, unknown> = {};
+        customType.comparisonFields.forEach(field => {
+          itemValues[field] = getValueAtPath(item, field);
+        });
+        values[instanceId] = itemValues;
+        affectedInstances.push(instanceId);
+        
+        if (baseInstanceId && instanceId === baseInstanceId) {
+          hasBaseValue = true;
+          baseValue = itemValues;
+        }
+      } else {
+        values[instanceId] = 'MISSING';
+      }
+    });
+    
+    // Determine if there are differences
+    if (baseInstanceId && hasBaseValue) {
+      instanceIds.forEach(instanceId => {
+        if (instanceId !== baseInstanceId) {
+          const otherValue = values[instanceId];
+          if (JSON.stringify(otherValue) !== JSON.stringify(baseValue) && otherValue !== 'MISSING') {
+            hasDifference = true;
+          } else if (otherValue === 'MISSING') {
+            hasDifference = true;
+          }
+        }
+      });
+    } else {
+      const uniqueValues = new Set(Object.values(values).map(v => JSON.stringify(v)));
+      hasDifference = uniqueValues.size > 1;
+    }
+    
+    // Add result if there are differences
+    if (hasDifference) {
+      let type: ComparisonResult['type'] = 'edited';
+      let description = '';
+      
+      const missingInstances = instanceIds.filter(id => values[id] === 'MISSING');
+      const presentInstances = instanceIds.filter(id => values[id] !== 'MISSING');
+      
+      if (missingInstances.length > 0 && presentInstances.length > 0) {
+        if (baseInstanceId) {
+          if (values[baseInstanceId] === 'MISSING') {
+            type = 'added';
+            description = `${customType.label} item "${itemId}" added in ${presentInstances.length} instance(s) (not present in base)`;
+          } else {
+            type = 'deleted';
+            description = `${customType.label} item "${itemId}" deleted in ${missingInstances.length} instance(s) (present in base)`;
+          }
+        } else {
+          if (missingInstances.length < presentInstances.length) {
+            type = 'added';
+            description = `${customType.label} item "${itemId}" added in ${presentInstances.length} instance(s), missing in ${missingInstances.length}`;
+          } else {
+            type = 'deleted';
+            description = `${customType.label} item "${itemId}" deleted in ${missingInstances.length} instance(s), present in ${presentInstances.length}`;
+          }
+        }
+      } else if (presentInstances.length === instanceIds.length) {
+        type = 'edited';
+        if (baseInstanceId && hasBaseValue) {
+          const differentInstances = instanceIds.filter(id => id !== baseInstanceId && JSON.stringify(values[id]) !== JSON.stringify(baseValue));
+          description = `${customType.label} item "${itemId}" differs from base in ${differentInstances.length} instance(s)`;
+        } else {
+          description = `${customType.label} item "${itemId}" has inconsistent values across instances`;
+        }
+      }
+      
+      results.push({
+        path: itemId,
+        type,
+        values,
+        affectedInstances,
+        description,
+      });
+    }
+  });
+  
+  return results;
+};
+
+// Custom comparison function for object-based custom types
+const compareCustomObjectData = (
+  instanceData: Record<string, SettingsData | CodeTableData>,
+  instanceIds: string[],
+  customType: CustomComparisonType,
+  baseInstanceId?: string
+): ComparisonResult[] => {
+  const results: ComparisonResult[] = [];
+  
+  // Only compare specified fields
+  customType.comparisonFields.forEach(fieldPath => {
+    const values: Record<string, unknown> = {};
+    const affectedInstances: string[] = [];
+    let hasBaseValue = false;
+    let baseValue: unknown;
+    let hasDifference = false;
+    
+    // Collect values from all instances for this field
+    instanceIds.forEach(instanceId => {
+      const data = instanceData[instanceId];
+      if (data) {
+        const value = getValueAtPath(data, fieldPath);
+        if (value !== undefined) {
+          values[instanceId] = value;
+          affectedInstances.push(instanceId);
+          
+          if (baseInstanceId && instanceId === baseInstanceId) {
+            hasBaseValue = true;
+            baseValue = value;
+          }
+        } else {
+          values[instanceId] = 'MISSING';
+        }
+      } else {
+        values[instanceId] = 'MISSING';
+      }
+    });
+    
+    // Determine if there are differences
+    if (baseInstanceId && hasBaseValue) {
+      instanceIds.forEach(instanceId => {
+        if (instanceId !== baseInstanceId) {
+          const otherValue = values[instanceId];
+          if (JSON.stringify(otherValue) !== JSON.stringify(baseValue) && otherValue !== 'MISSING') {
+            hasDifference = true;
+          } else if (otherValue === 'MISSING') {
+            hasDifference = true;
+          }
+        }
+      });
+    } else {
+      const uniqueValues = new Set(Object.values(values).map(v => JSON.stringify(v)));
+      hasDifference = uniqueValues.size > 1;
+    }
+    
+    // Add result if there are differences
+    if (hasDifference) {
+      let type: ComparisonResult['type'] = 'edited';
+      let description = '';
+      
+      const missingInstances = instanceIds.filter(id => values[id] === 'MISSING');
+      const presentInstances = instanceIds.filter(id => values[id] !== 'MISSING');
+      
+      if (missingInstances.length > 0 && presentInstances.length > 0) {
+        if (baseInstanceId) {
+          if (values[baseInstanceId] === 'MISSING') {
+            type = 'added';
+            description = `${customType.label} field "${fieldPath}" added in ${presentInstances.length} instance(s) (not present in base)`;
+          } else {
+            type = 'deleted';
+            description = `${customType.label} field "${fieldPath}" deleted in ${missingInstances.length} instance(s) (present in base)`;
+          }
+        } else {
+          if (missingInstances.length < presentInstances.length) {
+            type = 'added';
+            description = `${customType.label} field "${fieldPath}" added in ${presentInstances.length} instance(s), missing in ${missingInstances.length}`;
+          } else {
+            type = 'deleted';
+            description = `${customType.label} field "${fieldPath}" deleted in ${missingInstances.length} instance(s), present in ${presentInstances.length}`;
+          }
+        }
+      } else if (presentInstances.length === instanceIds.length) {
+        type = 'edited';
+        if (baseInstanceId && hasBaseValue) {
+          const differentInstances = instanceIds.filter(id => id !== baseInstanceId && JSON.stringify(values[id]) !== JSON.stringify(baseValue));
+          description = `${customType.label} field "${fieldPath}" differs from base value in ${differentInstances.length} instance(s)`;
+        } else {
+          description = `${customType.label} field "${fieldPath}" has inconsistent values across instances`;
+        }
+      }
+      
+      results.push({
+        path: fieldPath,
+        type,
+        values,
+        affectedInstances,
+        description,
+      });
+    }
+  });
+  
+  return results;
+};
+
 const comparisonSlice = createSlice({
   name: 'comparison',
   initialState,
@@ -363,22 +647,61 @@ const comparisonSlice = createSlice({
     setBaseInstanceId: (state, action: PayloadAction<string | null>) => {
       state.baseInstanceId = action.payload;
     },
-    setCurrentEndpoint: (state, action: PayloadAction<string>) => {
-      state.currentEndpoint = action.payload;
-    },
-    setComparisonType: (state, action: PayloadAction<'settings' | 'codeTable' | 'featureToggle'>) => {
+    setComparisonType: (state, action: PayloadAction<'settings' | 'codeTable' | 'featureToggle' | string>) => {
       state.comparisonType = action.payload;
-      // Update endpoint based on type
-      switch (action.payload) {
-        case 'settings':
-          state.currentEndpoint = '/api/settings';
-          break;
-        case 'codeTable':
-          state.currentEndpoint = '/api/code-table';
-          break;
-        case 'featureToggle':
-          state.currentEndpoint = '/GetAllFeatureFlags';
-          break;
+      // Update endpoints based on type
+      const customType = state.customTypes.find(t => t.id === action.payload);
+      if (customType) {
+        state.currentFetchEndpoint = customType.fetchEndpoint;
+        state.currentSaveEndpoint = customType.saveEndpoint;
+      } else {
+        // Use configurable built-in endpoints
+        const builtInConfig = state.builtInEndpoints[action.payload];
+        if (builtInConfig) {
+          state.currentFetchEndpoint = builtInConfig.fetchEndpoint;
+          state.currentSaveEndpoint = builtInConfig.saveEndpoint;
+        }
+      }
+    },
+    updateBuiltInEndpoints: (state, action: PayloadAction<{ type: string; fetchEndpoint: string; saveEndpoint: string }>) => {
+      const { type, fetchEndpoint, saveEndpoint } = action.payload;
+      state.builtInEndpoints[type] = { fetchEndpoint, saveEndpoint };
+      // Update current endpoints if this is the active type
+      if (state.comparisonType === type) {
+        state.currentFetchEndpoint = fetchEndpoint;
+        state.currentSaveEndpoint = saveEndpoint;
+      }
+    },
+    addCustomComparisonType: (state, action: PayloadAction<Omit<CustomComparisonType, 'id' | 'createdAt'>>) => {
+      const newType: CustomComparisonType = {
+        ...action.payload,
+        id: `custom-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+      };
+      state.customTypes.push(newType);
+      saveCustomTypesToLocalStorage(state.customTypes);
+    },
+    updateCustomComparisonType: (state, action: PayloadAction<CustomComparisonType>) => {
+      const index = state.customTypes.findIndex(t => t.id === action.payload.id);
+      if (index !== -1) {
+        state.customTypes[index] = action.payload;
+        saveCustomTypesToLocalStorage(state.customTypes);
+        // Update current endpoints if this is the active type
+        if (state.comparisonType === action.payload.id) {
+          state.currentFetchEndpoint = action.payload.fetchEndpoint;
+          state.currentSaveEndpoint = action.payload.saveEndpoint;
+        }
+      }
+    },
+    deleteCustomComparisonType: (state, action: PayloadAction<string>) => {
+      state.customTypes = state.customTypes.filter(t => t.id !== action.payload);
+      saveCustomTypesToLocalStorage(state.customTypes);
+      // If the deleted type was currently selected, reset to settings
+      if (state.comparisonType === action.payload) {
+        state.comparisonType = 'settings';
+        const settingsConfig = state.builtInEndpoints.settings;
+        state.currentFetchEndpoint = settingsConfig.fetchEndpoint;
+        state.currentSaveEndpoint = settingsConfig.saveEndpoint;
       }
     },
     createComparisonSession: (state, action: PayloadAction<{
@@ -397,6 +720,8 @@ const comparisonSlice = createSlice({
       const results: ComparisonResult[] = [];
 
       // Use specialized comparison based on comparison type
+      const customType = state.customTypes.find(t => t.id === state.comparisonType);
+      
       if (state.comparisonType === 'featureToggle') {
         const featureToggleData: Record<string, FeatureToggle[]> = {};
         instanceIds.forEach(id => {
@@ -405,6 +730,24 @@ const comparisonSlice = createSlice({
           }
         });
         results.push(...compareFeatureToggles(featureToggleData, instanceIds, state.baseInstanceId || undefined));
+      } else if (customType && customType.identifierField) {
+        // Custom type with array data (like feature toggles)
+        const customArrayData: Record<string, Record<string, unknown>[]> = {};
+        instanceIds.forEach(id => {
+          if (instanceData[id]) {
+            customArrayData[id] = instanceData[id] as unknown as Record<string, unknown>[];
+          }
+        });
+        results.push(...compareCustomArrayData(customArrayData, instanceIds, customType, state.baseInstanceId || undefined));
+      } else if (customType && customType.comparisonFields.length > 0) {
+        // Custom type with object data and specific fields
+        const genericData: Record<string, SettingsData | CodeTableData> = {};
+        instanceIds.forEach(id => {
+          if (instanceData[id]) {
+            genericData[id] = instanceData[id] as SettingsData | CodeTableData;
+          }
+        });
+        results.push(...compareCustomObjectData(genericData, instanceIds, customType, state.baseInstanceId || undefined));
       } else {
         // Use generic comparison for settings and codeTable
         const genericData: Record<string, SettingsData | CodeTableData> = {};
@@ -464,8 +807,11 @@ const comparisonSlice = createSlice({
 export const {
   setSelectedInstances,
   setBaseInstanceId,
-  setCurrentEndpoint,
   setComparisonType,
+  updateBuiltInEndpoints,
+  addCustomComparisonType,
+  updateCustomComparisonType,
+  deleteCustomComparisonType,
   createComparisonSession,
   setActiveSession,
   deleteSession,

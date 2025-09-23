@@ -35,13 +35,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <Database className="h-5 w-5" />
               </div>
               <div>
-                <h1 className="text-xl font-semibold text-foreground">JSON Comparator</h1>
+                <h1 className="text-xl font-semibold text-foreground">Config Comparison Tool</h1>
                 <p className="text-xs text-muted-foreground">Multi-instance configuration comparison</p>
               </div>
             </div>
             
             <Badge variant="secondary" className="text-xs">
-              Professional
+              Preview
             </Badge>
           </div>
         </div>
