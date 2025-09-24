@@ -314,13 +314,8 @@ const Summary: React.FC = () => {
 
         console.log('Selected and filtered items:', selectedItems);
 
-        // For multiple feature toggles, return them as an array within the Data object
-        if (selectedItems.length === 1) {
-          finalData = selectedItems[0];
-        } else if (selectedItems.length > 1) {
-          // Return as array for multiple items
-          finalData = selectedItems;
-        }
+        // Always return as array since backend expects List<T> in Data property
+        finalData = selectedItems;
       } else {
         // Handle object-based data or custom types without identifier field
         console.log('Processing object-based data');
@@ -369,7 +364,7 @@ const Summary: React.FC = () => {
         await dispatch(postInstanceData({
           instanceId: migrationTarget,
           endpoint: currentSaveEndpoint,
-          data: { Data: finalData }
+          data: { "Data": finalData }
         }));
 
         toast({
@@ -431,7 +426,7 @@ const Summary: React.FC = () => {
       await dispatch(postInstanceData({
         instanceId: migrationTarget,
         endpoint: currentSaveEndpoint,
-        data: { Data: migrationData }
+        data: { "Data": migrationData }
       }));
 
       toast({
