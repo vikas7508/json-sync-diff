@@ -25,7 +25,7 @@ const saveInstancesToLocalStorage = (instances: Instance[]) => {
   try {
     localStorage.setItem(INSTANCES_STORAGE_KEY, JSON.stringify(instances));
   } catch (error) {
-    console.error('Failed to save instances to localStorage:', error);
+    // Failed to save instances to localStorage
   }
 };
 
@@ -34,7 +34,7 @@ const loadInstancesFromLocalStorage = (): Instance[] => {
     const stored = localStorage.getItem(INSTANCES_STORAGE_KEY);
     return stored ? JSON.parse(stored) : [];
   } catch (error) {
-    console.error('Failed to load instances from localStorage:', error);
+    // Failed to load instances from localStorage
     return [];
   }
 };
@@ -43,7 +43,7 @@ const saveInstanceDataToLocalStorage = (instanceData: Record<string, InstanceDat
   try {
     localStorage.setItem(INSTANCE_DATA_STORAGE_KEY, JSON.stringify(instanceData));
   } catch (error) {
-    console.error('Failed to save instance data to localStorage:', error);
+    // Failed to save instance data to localStorage
   }
 };
 
@@ -52,7 +52,7 @@ const loadInstanceDataFromLocalStorage = (): Record<string, InstanceData> => {
     const stored = localStorage.getItem(INSTANCE_DATA_STORAGE_KEY);
     return stored ? JSON.parse(stored) : {};
   } catch (error) {
-    console.error('Failed to load instance data from localStorage:', error);
+    // Failed to load instance data from localStorage
     return {};
   }
 };

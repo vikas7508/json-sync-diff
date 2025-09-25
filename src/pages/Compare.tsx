@@ -53,24 +53,24 @@ const Compare: React.FC = () => {
       value: 'settings', 
       label: 'Settings', 
       icon: Settings, 
-      fetchEndpoint: '/api/settings',
-      saveEndpoint: '/TurnOn',
+      fetchEndpoint: '/Biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/ConfigCompareManager/GetAllSettings',
+      saveEndpoint: '/Biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/ConfigCompareManager/UpdateSettings',
       description: 'Compare application configuration settings'
     },
     { 
       value: 'codeTable', 
       label: 'Code Tables', 
       icon: Database, 
-      fetchEndpoint: '/api/code-table',
-      saveEndpoint: '/TurnOn',
+      fetchEndpoint: '/Biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/ConfigCompareManager/GetAllCodeTableValues',
+      saveEndpoint: '/TurnOnSettings',
       description: 'Compare lookup tables and reference data'
     },
     { 
       value: 'featureToggle', 
       label: 'Feature Toggles', 
       icon: ToggleLeft, 
-      fetchEndpoint: '/GetAllFeatureFlags',
-      saveEndpoint: '/TurnOnToggles',
+      fetchEndpoint: '/biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/GetAllFeatureFlags',
+      saveEndpoint: '/biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/UpdateFeatureToggle',
       description: 'Compare feature flags and toggles'
     },
     // Add custom types

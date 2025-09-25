@@ -15,6 +15,21 @@ export interface FeatureToggle {
   DBValue: number;
 }
 
+export interface SettingItem {
+  Entity: string;
+  Name: string;
+  Description: string;
+  Data: string;
+  Role: number;
+  Profile: number;
+  Format: string;
+  Recno: number;
+  RoleText: string | null;
+  ProfileText: string | null;
+  OverriddenFor: string;
+  UpdatedBy: number;
+}
+
 export interface SettingsData {
   [key: string]: unknown;
 }
@@ -24,7 +39,7 @@ export interface CodeTableData {
 }
 
 // Union type for all data types
-export type ComparisonData = FeatureToggle[] | SettingsData | CodeTableData;
+export type ComparisonData = FeatureToggle[] | SettingItem[] | SettingsData | CodeTableData;
 
 // Custom comparison type interface
 export interface CustomComparisonType {
@@ -74,7 +89,7 @@ const saveComparisonSessionsToLocalStorage = (sessions: ComparisonSession[]) => 
   try {
     localStorage.setItem(COMPARISON_STORAGE_KEY, JSON.stringify(sessions));
   } catch (error) {
-    console.error('Failed to save comparison sessions to localStorage:', error);
+    // Failed to save comparison sessions to localStorage
   }
 };
 
@@ -83,7 +98,7 @@ const loadComparisonSessionsFromLocalStorage = (): ComparisonSession[] => {
     const stored = localStorage.getItem(COMPARISON_STORAGE_KEY);
     return stored ? JSON.parse(stored) : [];
   } catch (error) {
-    console.error('Failed to load comparison sessions from localStorage:', error);
+    // Failed to load comparison sessions from localStorage
     return [];
   }
 };
@@ -92,7 +107,7 @@ const saveCustomTypesToLocalStorage = (customTypes: CustomComparisonType[]) => {
   try {
     localStorage.setItem(CUSTOM_TYPES_STORAGE_KEY, JSON.stringify(customTypes));
   } catch (error) {
-    console.error('Failed to save custom types to localStorage:', error);
+    // Failed to save custom types to localStorage
   }
 };
 
@@ -101,7 +116,7 @@ const loadCustomTypesFromLocalStorage = (): CustomComparisonType[] => {
     const stored = localStorage.getItem(CUSTOM_TYPES_STORAGE_KEY);
     return stored ? JSON.parse(stored) : [];
   } catch (error) {
-    console.error('Failed to load custom types from localStorage:', error);
+    // Failed to load custom types from localStorage
     return [];
   }
 };
@@ -114,7 +129,7 @@ const saveBuiltInEndpointsToLocalStorage = (builtInEndpoints: Record<string, {
   try {
     localStorage.setItem(BUILTIN_ENDPOINTS_STORAGE_KEY, JSON.stringify(builtInEndpoints));
   } catch (error) {
-    console.error('Failed to save built-in endpoints to localStorage:', error);
+    // Failed to save built-in endpoints to localStorage
   }
 };
 
@@ -129,23 +144,23 @@ const loadBuiltInEndpointsFromLocalStorage = (): Record<string, {
       return JSON.parse(stored);
     }
   } catch (error) {
-    console.error('Failed to load built-in endpoints from localStorage:', error);
+    // Failed to load built-in endpoints from localStorage
   }
   
   // Return default values if not found in localStorage
   return {
     settings: {
-      fetchEndpoint: '/api/settings',
-      saveEndpoint: '/TurnOn',
+      fetchEndpoint: '/Biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/ConfigCompareManager/GetAllSettings',
+      saveEndpoint: '/Biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/ConfigCompareManager/UpdateSettings',
       requestBody: { settingContextRecno: 1 }
     },
     codeTable: {
-      fetchEndpoint: '/api/code-table',
+      fetchEndpoint: '/Biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/ConfigCompareManager/GetAllCodeTableValues',
       saveEndpoint: '/TurnOn'
     },
     featureToggle: {
-      fetchEndpoint: '/GetAllFeatureFlags',
-      saveEndpoint: '/TurnOnToggles'
+      fetchEndpoint: '/biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/GetAllFeatureFlags',
+      saveEndpoint: '/biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/UpdateFeatureToggle',
     }
   };
 };
@@ -177,8 +192,8 @@ const initialState: ComparisonState = {
   activeSessionId: loadedSessions[0]?.id || null,
   selectedInstances: [],
   baseInstanceId: null,
-  currentFetchEndpoint: '/api/settings',
-  currentSaveEndpoint: '/api/settings',
+  currentFetchEndpoint: '/biz/v2/api/call/SI.Biz.Core/SI.Biz.Core.Utility.ConfigCompareManager/ConfigCompareManager/GetAllSettings',
+  currentSaveEndpoint: '/TurnOnSettings',
   comparisonType: 'settings',
   customTypes: loadedCustomTypes,
   builtInEndpoints: loadedBuiltInEndpoints,
@@ -320,6 +335,126 @@ const compareFeatureToggles = (
       
       results.push({
         path: featureName,
+        type,
+        values,
+        affectedInstances,
+        description,
+      });
+    }
+  });
+  
+  return results;
+};
+
+// Specialized comparison function for settings data
+const compareSettings = (
+  instanceData: Record<string, SettingItem[]>,
+  instanceIds: string[],
+  baseInstanceId?: string
+): ComparisonResult[] => {
+  const results: ComparisonResult[] = [];
+  
+  // Create a map of all unique setting entities across all instances
+  const allSettingEntities = new Set<string>();
+  const instanceSettingMaps = new Map<string, Map<string, SettingItem>>();
+  
+  // Build setting maps for each instance
+  instanceIds.forEach(instanceId => {
+    const settings = instanceData[instanceId] || [];
+    const settingMap = new Map(settings.map(s => [s.Entity, s]));
+    instanceSettingMaps.set(instanceId, settingMap);
+    
+    settings.forEach(s => allSettingEntities.add(s.Entity));
+  });
+  
+  // Compare each setting across all instances
+  allSettingEntities.forEach(entity => {
+    const values: Record<string, unknown> = {};
+    const affectedInstances: string[] = [];
+    let hasBaseValue = false;
+    let baseValue: string | undefined;
+    let hasDifference = false;
+    
+    // Collect values from all instances (including missing ones)
+    instanceIds.forEach(instanceId => {
+      const settingMap = instanceSettingMaps.get(instanceId);
+      const setting = settingMap?.get(entity);
+      
+      if (setting) {
+        values[instanceId] = setting.Data;
+        affectedInstances.push(instanceId);
+        
+        if (baseInstanceId && instanceId === baseInstanceId) {
+          hasBaseValue = true;
+          baseValue = setting.Data;
+        }
+      } else {
+        // Mark as missing for this instance
+        values[instanceId] = 'MISSING';
+      }
+    });
+    
+    // Determine if there are differences
+    if (baseInstanceId && hasBaseValue) {
+      // Base instance comparison: only flag differences from base
+      instanceIds.forEach(instanceId => {
+        if (instanceId !== baseInstanceId) {
+          const otherValue = values[instanceId];
+          if (otherValue !== baseValue && otherValue !== 'MISSING') {
+            hasDifference = true;
+          } else if (otherValue === 'MISSING') {
+            hasDifference = true;
+          }
+        }
+      });
+    } else {
+      // No base instance: flag any differences between instances
+      const uniqueValues = new Set(Object.values(values));
+      hasDifference = uniqueValues.size > 1;
+    }
+    
+    // Add result if there are differences or if it's a key setting
+    if (hasDifference || affectedInstances.length !== instanceIds.length) {
+      let type: ComparisonResult['type'] = 'edited';
+      let description = '';
+      
+      // Determine the type of difference
+      const missingInstances = instanceIds.filter(id => values[id] === 'MISSING');
+      const presentInstances = instanceIds.filter(id => values[id] !== 'MISSING');
+      
+      if (missingInstances.length > 0 && presentInstances.length > 0) {
+        // Some instances have the setting, others don't
+        if (baseInstanceId) {
+          if (values[baseInstanceId] === 'MISSING') {
+            type = 'added';
+            description = `Setting "${entity}" added in ${presentInstances.length} instance(s) (not present in base)`;
+          } else {
+            type = 'deleted';
+            description = `Setting "${entity}" deleted in ${missingInstances.length} instance(s) (present in base with value "${baseValue}")`;
+          }
+        } else {
+          // No base instance defined
+          if (missingInstances.length < presentInstances.length) {
+            type = 'added';
+            description = `Setting "${entity}" added in ${presentInstances.length} instance(s), missing in ${missingInstances.length}`;
+          } else {
+            type = 'deleted';
+            description = `Setting "${entity}" deleted in ${missingInstances.length} instance(s), present in ${presentInstances.length}`;
+          }
+        }
+      } else if (presentInstances.length === instanceIds.length) {
+        // Present in all instances but with different values
+        type = 'edited';
+        if (baseInstanceId && hasBaseValue) {
+          const differentInstances = instanceIds.filter(id => id !== baseInstanceId && values[id] !== baseValue);
+          description = `Setting "${entity}" differs from base value "${baseValue}" in ${differentInstances.length} instance(s)`;
+        } else {
+          description = `Setting "${entity}" has inconsistent values across instances`;
+        }
+      }
+      
+      results.push({
+        path: entity,
         type,
         values,
         affectedInstances,
@@ -780,6 +915,14 @@ const comparisonSlice = createSlice({
           }
         });
         results.push(...compareFeatureToggles(featureToggleData, instanceIds, state.baseInstanceId || undefined));
+      } else if (state.comparisonType === 'settings') {
+        const settingsData: Record<string, SettingItem[]> = {};
+        instanceIds.forEach(id => {
+          if (instanceData[id]) {
+            settingsData[id] = instanceData[id] as SettingItem[];
+          }
+        });
+        results.push(...compareSettings(settingsData, instanceIds, state.baseInstanceId || undefined));
       } else if (customType && customType.identifierField) {
         // Custom type with array data (like feature toggles)
         const customArrayData: Record<string, Record<string, unknown>[]> = {};
