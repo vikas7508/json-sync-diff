@@ -203,8 +203,9 @@ const Summary: React.FC = () => {
       return;
     }
 
-    // Special handling for settings migration - always use array format
-    if (comparisonType === 'settings' || comparisonType?.toLowerCase() === 'settings' || comparisonType?.includes('settings')) {
+    // Special handling for settings and code table migration - always use array format
+    if (comparisonType === 'settings' || comparisonType?.toLowerCase() === 'settings' || comparisonType?.includes('settings') ||
+        comparisonType === 'codeTable' || comparisonType?.toLowerCase() === 'codetable' || comparisonType?.includes('codeTable')) {
       const sourceInstanceData = instanceData[migrationSource];
       
       if (!sourceInstanceData || !Array.isArray(sourceInstanceData.data)) {
@@ -218,21 +219,66 @@ const Summary: React.FC = () => {
 
       const sourceArray = sourceInstanceData.data as Record<string, unknown>[];
       
-      // Collect all unique identifiers from selected paths
-      const selectedIdentifiers = new Set<string>();
-      selectedForMigration.forEach(path => {
-        // For settings, the path IS the entity identifier
-        selectedIdentifiers.add(path);
-      });
-
-      // Find corresponding settings items
+      // Initialize selected items array
       const selectedItems: Record<string, unknown>[] = [];
-      selectedIdentifiers.forEach(identifier => {
-        const sourceItem = sourceArray.find(item => item['Entity'] === identifier);
-        if (sourceItem) {
-          selectedItems.push(sourceItem);
-        }
-      });
+      console.log(selectedForMigration);
+      console.log(comparisonType);
+      if (comparisonType === 'settings') {
+        // For settings, collect entity identifiers and find corresponding SettingItem objects
+        const selectedIdentifiers = new Set<string>();
+        selectedForMigration.forEach(path => {
+          // For settings, the path IS the entity identifier
+          selectedIdentifiers.add(path);
+        });
+
+        // Find corresponding settings items
+        selectedIdentifiers.forEach(identifier => {
+          const sourceItem = sourceArray.find(item => item['Entity'] === identifier);
+          if (sourceItem) {
+            selectedItems.push(sourceItem);
+          }
+        });
+      } else if (comparisonType === 'codeTable') {
+        // Support selecting entire table (path === tableName) or individual records (tableName.recordKey)
+        type TableSelection = { all: boolean; keys: Set<number> };
+        const tableSelections = new Map<string, TableSelection>();
+        selectedForMigration.forEach(path => {
+          if (path.includes('.') && /\.\d+$/.test(path)) {
+            // record-level selection
+            const lastDot = path.lastIndexOf('.');
+            const tableName = path.substring(0, lastDot);
+            const keyStr = path.substring(lastDot + 1);
+            const keyNum = parseInt(keyStr, 10);
+            if (!Number.isNaN(keyNum)) {
+              if (!tableSelections.has(tableName)) tableSelections.set(tableName, { all: false, keys: new Set() });
+              const sel = tableSelections.get(tableName)!;
+              if (!sel.all) sel.keys.add(keyNum);
+            }
+          } else {
+            // table-level selection
+            if (!tableSelections.has(path)) tableSelections.set(path, { all: true, keys: new Set() });
+            else tableSelections.get(path)!.all = true; // upgrade
+          }
+        });
+        console.log(selectedForMigration);
+        tableSelections.forEach((sel, tableName) => {
+          interface TableVariant { Name: string; CtData?: CtRecord[]; ctdata?: CtRecord[] }
+          interface CtRecord { Key: number; Code: string; Description: string; Expired: boolean }
+          const found = sourceArray.find(item => item['Name'] === tableName);
+          const originalTable = found ? (found as unknown as TableVariant) : undefined;
+          if (!originalTable) return;
+          const records: CtRecord[] = Array.isArray(originalTable.CtData)
+            ? originalTable.CtData
+            : (Array.isArray(originalTable.ctdata) ? originalTable.ctdata as CtRecord[] : []);
+          console.log(records);
+          if (sel.all) {
+            if (records.length > 0) selectedItems.push({ Name: tableName, CtData: records });
+          } else {
+            const filtered = records.filter(r => sel.keys.has(r.Key));
+            if (filtered.length > 0) selectedItems.push({ Name: tableName, CtData: filtered });
+          }
+        });
+      }
 
       if (selectedItems.length === 0) {
         toast({
@@ -250,9 +296,10 @@ const Summary: React.FC = () => {
           data: { "Data": selectedItems }
         }));
 
+        const label = comparisonType === 'codeTable' ? 'code table item(s)' : 'settings';
         toast({
           title: "Migration Successful",
-          description: `${selectedItems.length} settings migrated to ${getInstanceName(migrationTarget)}`,
+          description: `${selectedItems.length} ${label} migrated to ${getInstanceName(migrationTarget)}`,
         });
 
         setSelectedForMigration([]);

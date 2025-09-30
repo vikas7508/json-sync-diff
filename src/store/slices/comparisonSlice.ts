@@ -30,6 +30,19 @@ export interface SettingItem {
   UpdatedBy: number;
 }
 
+export interface CodeTableRecord {
+  Key: number;
+  Code: string;
+  Description: string;
+  Expired: boolean;
+}
+
+export interface CodeTableItem {
+  Name: string;
+  Key: number;
+  CtData: CodeTableRecord[];
+}
+
 export interface SettingsData {
   [key: string]: unknown;
 }
@@ -39,7 +52,7 @@ export interface CodeTableData {
 }
 
 // Union type for all data types
-export type ComparisonData = FeatureToggle[] | SettingItem[] | SettingsData | CodeTableData;
+export type ComparisonData = FeatureToggle[] | SettingItem[] | CodeTableItem[] | SettingsData | CodeTableData;
 
 // Custom comparison type interface
 export interface CustomComparisonType {
@@ -156,11 +169,11 @@ const loadBuiltInEndpointsFromLocalStorage = (): Record<string, {
     },
     codeTable: {
       fetchEndpoint: '/Biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/ConfigCompareManager/GetAllCodeTableValues',
-      saveEndpoint: '/TurnOn'
+      saveEndpoint: '/Biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/ConfigCompareManager/UpdateCodeTable'
     },
     featureToggle: {
-      fetchEndpoint: '/biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/GetAllFeatureFlags',
-      saveEndpoint: '/biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/UpdateFeatureToggle',
+      fetchEndpoint: '/Biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/ConfigCompareManager/GetAllFeatureToggles',
+      saveEndpoint: '/Biz/v2/api/call/SI.Client.Api.Admin/SI.Client.Api.Admin.ConfigCompareManager/ConfigCompareManager/UpdateFeatureToggle',
     }
   };
 };
@@ -461,6 +474,224 @@ const compareSettings = (
         description,
       });
     }
+  });
+  
+  return results;
+};
+
+// Specialized comparison function for code table data
+const compareCodeTables = (
+  instanceData: Record<string, CodeTableItem[]>,
+  instanceIds: string[],
+  baseInstanceId?: string
+): ComparisonResult[] => {
+  const results: ComparisonResult[] = [];
+  
+  // Create a map of all unique code table names across all instances
+  const allCodeTableNames = new Set<string>();
+  const instanceCodeTableMaps = new Map<string, Map<string, CodeTableItem>>();
+  
+  // Build code table maps for each instance
+  instanceIds.forEach(instanceId => {
+    const rawCodeTables = instanceData[instanceId] || [];
+    // Normalize and defensively guard against malformed structures
+    const codeTables: CodeTableItem[] = rawCodeTables
+      .filter(ct => ct && typeof ct === 'object' && 'Name' in ct)
+      .map(ct => ({
+        ...ct,
+        CtData: Array.isArray((ct as CodeTableItem).CtData)
+          ? (ct as CodeTableItem).CtData.filter(r => r && typeof r === 'object' && 'Key' in r && 'Code' in r)
+          : []
+      })) as CodeTableItem[];
+
+    const codeTableMap = new Map(codeTables.map(ct => [ct.Name, ct]));
+    instanceCodeTableMaps.set(instanceId, codeTableMap);
+    
+    codeTables.forEach(ct => allCodeTableNames.add(ct.Name));
+  });
+  
+  // Compare each code table across all instances
+  allCodeTableNames.forEach(tableName => {
+    // Detect presence of the table across instances (even if not in the first instance)
+    const tablePresence: Record<string, 'PRESENT' | 'MISSING'> = {};
+    const presentInstances: string[] = [];
+    const missingInstances: string[] = [];
+    instanceIds.forEach(id => {
+      const hasTable = instanceCodeTableMaps.get(id)?.has(tableName) ?? false;
+      if (hasTable) {
+        tablePresence[id] = 'PRESENT';
+        presentInstances.push(id);
+      } else {
+        tablePresence[id] = 'MISSING';
+        missingInstances.push(id);
+      }
+    });
+
+    // If table presence differs across instances, emit a table-level result
+    if (missingInstances.length > 0 && presentInstances.length > 0) {
+      let type: ComparisonResult['type'] = 'edited'; // will adjust below
+      let description = '';
+      if (baseInstanceId) {
+        if (tablePresence[baseInstanceId] === 'MISSING') {
+          type = 'added';
+          description = `Code table "${tableName}" added in ${presentInstances.length} instance(s) (not present in base)`;
+        } else {
+          type = 'deleted';
+          description = `Code table "${tableName}" deleted in ${missingInstances.length} instance(s) (present in base)`;
+        }
+      } else {
+        if (presentInstances.length >= missingInstances.length) {
+          type = 'added';
+          description = `Code table "${tableName}" present in ${presentInstances.length} instance(s), missing in ${missingInstances.length}`;
+        } else {
+          type = 'deleted';
+          description = `Code table "${tableName}" missing in ${missingInstances.length} instance(s), present in ${presentInstances.length}`;
+        }
+      }
+      results.push({
+        path: tableName,
+        type,
+        values: tablePresence,
+        affectedInstances: presentInstances,
+        description,
+      });
+    }
+
+    // For each code table, compare the CtData records (treat missing table as empty list)
+    const allRecordKeys = new Set<number>();
+    const instanceRecordMaps = new Map<string, Map<number, CodeTableRecord>>();
+    
+    // Build record maps for each instance for this specific code table
+    instanceIds.forEach(instanceId => {
+      const codeTableMap = instanceCodeTableMaps.get(instanceId);
+      const codeTable = codeTableMap?.get(tableName);
+
+      if (codeTable) {
+        const rows = Array.isArray(codeTable.CtData) ? codeTable.CtData : [];
+        const recordMap = new Map(rows.map(record => [record.Key, record]));
+        instanceRecordMaps.set(instanceId, recordMap);
+        rows.forEach(record => allRecordKeys.add(record.Key));
+      } else {
+        instanceRecordMaps.set(instanceId, new Map());
+      }
+    });
+    
+    // Compare each record across all instances
+    allRecordKeys.forEach(recordKey => {
+      const values: Record<string, unknown> = {};
+      const affectedInstances: string[] = [];
+      let hasBaseValue = false;
+      let baseValue: CodeTableRecord | undefined;
+      let hasDifference = false;
+      
+      // Collect values from all instances (including missing ones)
+      instanceIds.forEach(instanceId => {
+        const recordMap = instanceRecordMaps.get(instanceId);
+        const record = recordMap?.get(recordKey);
+        
+        if (record) {
+          values[instanceId] = {
+            Key: record.Key,
+            Code: record.Code,
+            Description: record.Description,
+            Expired: record.Expired
+          };
+          affectedInstances.push(instanceId);
+          
+          if (baseInstanceId && instanceId === baseInstanceId) {
+            hasBaseValue = true;
+            baseValue = record;
+          }
+        } else {
+          // Mark as missing for this instance
+          values[instanceId] = 'MISSING';
+        }
+      });
+      
+      // Determine if there are differences
+      if (baseInstanceId && hasBaseValue) {
+        // Base instance comparison: only flag differences from base
+        instanceIds.forEach(instanceId => {
+          if (instanceId !== baseInstanceId) {
+            const otherValue = values[instanceId];
+            if (otherValue !== 'MISSING' && baseValue) {
+              const otherRecord = otherValue as CodeTableRecord;
+              if (otherRecord.Code !== baseValue.Code || 
+                  otherRecord.Description !== baseValue.Description || 
+                  otherRecord.Expired !== baseValue.Expired) {
+                hasDifference = true;
+              }
+            } else if (otherValue === 'MISSING') {
+              hasDifference = true;
+            }
+          }
+        });
+      } else {
+        // No base instance: flag any differences between instances
+        const recordStrings = Object.values(values).map(v => 
+          v === 'MISSING' ? 'MISSING' : JSON.stringify(v)
+        );
+        const uniqueValues = new Set(recordStrings);
+        hasDifference = uniqueValues.size > 1;
+      }
+      
+      // Add result if there are differences
+      if (hasDifference || affectedInstances.length !== instanceIds.length) {
+        let type: ComparisonResult['type'] = 'edited';
+        let description = '';
+        
+        // Determine the type of difference
+        const missingInstances = instanceIds.filter(id => values[id] === 'MISSING');
+        const presentInstances = instanceIds.filter(id => values[id] !== 'MISSING');
+        
+        if (missingInstances.length > 0 && presentInstances.length > 0) {
+          // Some instances have the record, others don't
+          if (baseInstanceId) {
+            if (values[baseInstanceId] === 'MISSING') {
+              type = 'added';
+              description = `Code table "${tableName}" record with Key ${recordKey} added in ${presentInstances.length} instance(s) (not present in base)`;
+            } else {
+              type = 'deleted';
+              description = `Code table "${tableName}" record with Key ${recordKey} deleted in ${missingInstances.length} instance(s) (present in base)`;
+            }
+          } else {
+            // No base instance defined
+            if (missingInstances.length < presentInstances.length) {
+              type = 'added';
+              description = `Code table "${tableName}" record with Key ${recordKey} added in ${presentInstances.length} instance(s), missing in ${missingInstances.length}`;
+            } else {
+              type = 'deleted';
+              description = `Code table "${tableName}" record with Key ${recordKey} deleted in ${missingInstances.length} instance(s), present in ${presentInstances.length}`;
+            }
+          }
+        } else if (presentInstances.length === instanceIds.length) {
+          // Present in all instances but with different values
+          type = 'edited';
+          if (baseInstanceId && hasBaseValue) {
+            const differentInstances = instanceIds.filter(id => {
+              if (id === baseInstanceId) return false;
+              const otherValue = values[id];
+              if (otherValue === 'MISSING') return false;
+              const otherRecord = otherValue as CodeTableRecord;
+              return otherRecord.Code !== baseValue!.Code || 
+                     otherRecord.Description !== baseValue!.Description || 
+                     otherRecord.Expired !== baseValue!.Expired;
+            });
+            description = `Code table "${tableName}" record with Key ${recordKey} differs from base in ${differentInstances.length} instance(s)`;
+          } else {
+            description = `Code table "${tableName}" record with Key ${recordKey} has inconsistent values across instances`;
+          }
+        }
+        
+        results.push({
+          path: `${tableName}.${recordKey}`,
+          type,
+          values,
+          affectedInstances,
+          description,
+        });
+      }
+    });
   });
   
   return results;
@@ -923,6 +1154,14 @@ const comparisonSlice = createSlice({
           }
         });
         results.push(...compareSettings(settingsData, instanceIds, state.baseInstanceId || undefined));
+      } else if (state.comparisonType === 'codeTable') {
+        const codeTableData: Record<string, CodeTableItem[]> = {};
+        instanceIds.forEach(id => {
+          if (instanceData[id]) {
+            codeTableData[id] = instanceData[id] as CodeTableItem[];
+          }
+        });
+        results.push(...compareCodeTables(codeTableData, instanceIds, state.baseInstanceId || undefined));
       } else if (customType && customType.identifierField) {
         // Custom type with array data (like feature toggles)
         const customArrayData: Record<string, Record<string, unknown>[]> = {};
